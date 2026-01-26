@@ -21,9 +21,8 @@ jobs:
 
       - name: Build with Buildozer
         run: |
-          # This ensures the buildozer command we just installed is visible
           export PATH=$PATH:$HOME/.local/bin
-          buildozer android clean
+          # Removed the clean command that caused the crash
           yes | buildozer -v android debug
         env:
           ACCEPT_SDK_LICENSE: "yes"
