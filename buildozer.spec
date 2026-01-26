@@ -19,6 +19,7 @@ android.api = 34
 android.minapi = 21
 android.sdk = 34
 android.buildtools = 34.0.0
+android.enable_androidx = True
 
 [buildozer]
 log_level = 2
