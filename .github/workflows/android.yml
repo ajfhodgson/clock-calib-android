@@ -3,35 +3,26 @@ on: [push, pull_request]
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Dependencies
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Buildozer dependencies
         run: |
           sudo apt update
-          sudo apt install -y git zip unzip openjdk-17-jdk python3-pip autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev
-          # Install cython and virtualenv which Buildozer requires
-          pip3 install --user --upgrade buildozer cython virtualenv
+          sudo apt install -y git zip unzip openjdk-17-jdk autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev
+          pip install --upgrade pip
+          pip install buildozer cython virtualenv
 
       - name: Build with Buildozer
         run: |
-          export PATH=$PATH:$HOME/.local/bin
-          # 1. Manually create the SDK folder and license
-          mkdir -p $HOME/.buildozer/android/platform/android-sdk/licenses
-          echo -e "8933bad161af4178b1185d1a37fbf41ea5269c55\nd56f5187479451eabf01fb7438302572914d746a\n24333f8a63b6825ea9c5514f83c2829b004d1fee" > $HOME/.buildozer/android/platform/android-sdk/licenses/android-sdk-license
-          
-          # 2. Pre-download the command line tools so Buildozer doesn't use the wrong path
-          mkdir -p $HOME/.buildozer/android/platform/android-sdk/cmdline-tools
-          curl -O https://dl.google.com/android/repository/commandlinetools-linux-9447028_latest.zip
-          unzip -q commandlinetools-linux-9447028_latest.zip -d $HOME/.buildozer/android/platform/android-sdk/cmdline-tools
-          mv $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/cmdline-tools $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest
-
-          # 3. Set Environment Variable to help Buildozer find it
-          export ANDROID_SDK_ROOT=$HOME/.buildozer/android/platform/android-sdk
-          export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin
-          
-          buildozer -v android debug
+          # The key fix: force the license acceptance via the built-in buildozer way
+          yes | buildozer -v android debug
         env:
           ACCEPT_SDK_LICENSE: "yes"
 
@@ -40,4 +31,3 @@ jobs:
         with:
           name: clock-calibrator-apk
           path: bin/*.apk
-
