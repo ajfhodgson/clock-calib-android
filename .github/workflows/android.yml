@@ -17,8 +17,11 @@ jobs:
       - name: Build with Buildozer
         run: |
           export PATH=$PATH:$HOME/.local/bin
-          # Force accept all licenses before starting the build
-          yes | sdkmanager --sdk_root=$HOME/.buildozer/android/platform/android-sdk --licenses || true
+          # 1. Create the directory for the SDK licenses
+          mkdir -p $HOME/.buildozer/android/platform/android-sdk/licenses
+          # 2. Inject the hashes for the Android SDK licenses (Standard hashes for current SDKs)
+          echo -e "8933bad161af4178b1185d1a37fbf41ea5269c55\nd56f5187479451eabf01fb7438302572914d746a\n24333f8a63b6825ea9c5514f83c2829b004d1fee" > $HOME/.buildozer/android/platform/android-sdk/licenses/android-sdk-license
+          # 3. Run Buildozer
           buildozer -v android debug
         env:
           ACCEPT_SDK_LICENSE: "yes"

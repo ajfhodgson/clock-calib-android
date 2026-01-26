@@ -15,12 +15,10 @@ fullscreen = 0
 # Android specific permissions
 android.permissions = RECORD_AUDIO, WRITE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE
 
-# --- ADD THESE LINES HERE ---
 android.api = 34
 android.minapi = 21
 android.sdk = 34
 android.buildtools = 34.0.0
-# ----------------------------
 
 [buildozer]
 log_level = 2
