@@ -1,10 +1,18 @@
 import numpy as np
-import sounddevice as sd
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.button import Button
 from kivy.clock import Clock
+from kivy.utils import platform 
+if platform == 'android':
+    from android_audio import AndroidMic  # homebrew shim for android to look like Windows sounddevice
+    from android.permissions import request_permissions, Permission # type: ignore
+    request_permissions([Permission.RECORD_AUDIO])
+    mic = AndroidMic(sample_rate=44100)
+    mic.start()
+else:
+    import sounddevice as sd
 import threading
 import csv
 from datetime import datetime
