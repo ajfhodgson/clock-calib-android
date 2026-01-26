@@ -6,7 +6,7 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas
 version = 0.1
 
-# These are the critical requirements
+# Requirements
 requirements = python3, kivy, numpy
 
 orientation = portrait
@@ -15,8 +15,12 @@ fullscreen = 0
 # Android specific permissions
 android.permissions = RECORD_AUDIO, WRITE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE
 
-# (Optionally) Specify the entry point if not main.py
-# source.main = main.py
+# --- ADD THESE LINES HERE ---
+android.api = 34
+android.minapi = 21
+android.sdk = 34
+android.buildtools = 34.0.0
+# ----------------------------
 
 [buildozer]
 log_level = 2

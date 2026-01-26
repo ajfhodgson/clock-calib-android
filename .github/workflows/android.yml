@@ -17,6 +17,8 @@ jobs:
       - name: Build with Buildozer
         run: |
           export PATH=$PATH:$HOME/.local/bin
+          # Force accept all licenses before starting the build
+          yes | sdkmanager --sdk_root=$HOME/.buildozer/android/platform/android-sdk --licenses || true
           buildozer -v android debug
         env:
           ACCEPT_SDK_LICENSE: "yes"
@@ -26,3 +28,4 @@ jobs:
         with:
           name: clock-calibrator-apk
           path: bin/*.apk
+
