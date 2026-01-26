@@ -1,0 +1,20 @@
+name: Build Android APK
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build with Buildozer
+        uses: ArtemSerebrennkov/buildozer-action@v1
+        with:
+          buildozer_version: stable
+          python_version: 3.11
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: clock-calibrator-apk
+          path: bin/*.apk
