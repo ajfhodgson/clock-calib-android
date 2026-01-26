@@ -3,16 +3,22 @@ on: [push, pull_request]
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y git zip unzip openjdk-17-jdk python3-pip autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev
+          pip3 install --user --upgrade buildozer
+
       - name: Build with Buildozer
-        # This is the most stable and widely used action for Kivy
-        uses: akshayaurora/buildozer-action@v1
-        with:
-          buildozer_version: stable
-          python_version: 3.11
+        run: |
+          export PATH=$PATH:$HOME/.local/bin
+          buildozer -v android debug
+        env:
+          ACCEPT_SDK_LICENSE: "yes"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
