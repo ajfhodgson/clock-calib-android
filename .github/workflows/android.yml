@@ -17,11 +17,13 @@ jobs:
           sudo apt update
           sudo apt install -y git zip unzip openjdk-17-jdk autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev
           pip install --upgrade pip
-          pip install buildozer cython virtualenv
+          pip install --user buildozer "cython<3.0" virtualenv
 
       - name: Build with Buildozer
         run: |
-          # The key fix: force the license acceptance via the built-in buildozer way
+          # This ensures the buildozer command we just installed is visible
+          export PATH=$PATH:$HOME/.local/bin
+          buildozer android clean
           yes | buildozer -v android debug
         env:
           ACCEPT_SDK_LICENSE: "yes"
