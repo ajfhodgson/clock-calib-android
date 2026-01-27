@@ -1,0 +1,15 @@
+In VS Code, Run Python
+In Vs Code, Stage and Commit changes
+In VS Code, Sync Changes - with Github (this kicks off a Build Android APK action)
+Connect Phone via USB
+In Wndows Explorer, delete downloads .zip file
+In Wndows Explorer, delete AH S10-2 / SD card / .apk file
+On Phone, Uninstall the Clock Calib app
+In Github https://github.com/ajfhodgson/clock-calib-android/actions/workflows/android.yml monitor progress
+In Github, click on the run, scroll to Artifacts
+In Github, Download clock-calibrator-apk
+In Wndows Explorer, open zipfile, copy apk file, paste to downloads folder
+In Wndows Explorer, cut apk file, paste into SD card
+On Phone, File Manager, click on apk file
+Open Powershell to C:\Program Files\platform-tools>
+In Powershell,  ./adb logcat -s python OR ./adb logcat python:I *:S
