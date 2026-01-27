@@ -32,6 +32,10 @@ jobs:
           pip install --upgrade pip
           pip install --user buildozer "cython<3.0" virtualenv
 
+      - name: Install Android SDK 33
+        run: |
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_HOME "platforms;android-33" "build-tools;33.0.0"
+
       - name: Build with Buildozer
         run: |
           export PATH=$PATH:$HOME/.local/bin
