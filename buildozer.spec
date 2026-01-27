@@ -13,13 +13,15 @@ orientation = portrait
 fullscreen = 0
 
 # Android specific permissions
-android.permissions = RECORD_AUDIO, WRITE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE
+android.permissions = RECORD_AUDIO
 
-android.api = 34
+android.api = 33
 android.minapi = 21
-android.sdk = 34
-android.buildtools = 34.0.0
-android.enable_androidx = True
+android.sdk = 33
+android.buildtools = 33.0.0
+
+# Add this to skip manual license prompts:
+android.accept_sdk_license = True
 
 [buildozer]
 log_level = 2
