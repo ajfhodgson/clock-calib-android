@@ -3,6 +3,7 @@ from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.button import Button
+from kivy.uix.textinput import TextInput
 from kivy.clock import Clock
 from kivy.utils import platform 
 if platform == 'android':
@@ -18,7 +19,7 @@ import csv
 from datetime import datetime
 
 # --- TIER 2: ANALYSIS & I/O WORKER ---
-def save_csv_worker(data_chunk, timestamp):
+def save_csv_worker(app, data_chunk, timestamp):
     """Writes the 4s buffer to a CSV file in a background thread."""
     filename = f"clock_log_{timestamp}.csv"
     try:
@@ -28,11 +29,11 @@ def save_csv_worker(data_chunk, timestamp):
             writer.writerow(["Amplitude"])
             # Writing as a column for easy Excel analysis
             writer.writerows([[val] for val in data_chunk])
-        print(f"[Tier 2] Successfully saved {len(data_chunk)} samples to {filename}")
+        app.tell(f"[Tier 2] Successfully saved {len(data_chunk)} samples to {filename}")
     except Exception as e:
-        print(f"[Tier 2] I/O Error: {e}")
+        app.tell(f"[Tier 2] I/O Error: {e}")
 
-def save_histogram_worker(data_chunk, timestamp):
+def save_histogram_worker(app, data_chunk, timestamp):
     """Computes and writes histogram binning to a CSV file in a background thread."""
     filename = f"bins_{timestamp}.csv"
     try:
@@ -51,9 +52,9 @@ def save_histogram_worker(data_chunk, timestamp):
             for bin_num, (bin_max, count) in enumerate(zip(bin_edges[1:], counts)):
                 percentage = (count / total_samples * 100) if total_samples > 0 else 0.0
                 writer.writerow([bin_num, bin_max, int(count), f"{percentage:.2f}"])
-        print(f"[Tier 2] Successfully saved histogram to {filename}")
+        app.tell(f"[Tier 2] Successfully saved histogram to {filename}")
     except Exception as e:
-        print(f"[Tier 2] Histogram Error: {e}")
+        app.tell(f"[Tier 2] Histogram Error: {e}")
 
 class ClockApp(App):
     def build(self):
@@ -73,19 +74,49 @@ class ClockApp(App):
         
         # UI Setup
         layout = BoxLayout(orientation='vertical', padding=30, spacing=20)
+        
+        # Buttons layout - horizontal at top
+        buttons_layout = BoxLayout(orientation='horizontal', size_hint_y=0.15, spacing=10)
+        
+        self.start_btn = Button(text="Start", size_hint_x=1)
+        self.start_btn.bind(on_press=self.start_session)
+        buttons_layout.add_widget(self.start_btn)
+
+        self.stop_btn = Button(text="Stop", disabled=True, size_hint_x=1)
+        self.stop_btn.bind(on_press=self.stop_session)
+        buttons_layout.add_widget(self.stop_btn)
+
+        self.exit_btn = Button(text="Exit", size_hint_x=1)
+        self.exit_btn.bind(on_press=self.exit_app)
+        buttons_layout.add_widget(self.exit_btn)
+        
+        layout.add_widget(buttons_layout)
+
+        # Status label
         self.status_label = Label(
-            text="Ready to Record\nCSV logs will save every 4s", 
-            halign='center', font_size='18sp'
+            text="Ready to Record: Chunking at 4s. Press Start.", 
+            halign='center', font_size='12sp',
+            size_hint_y=0.15
         )
         layout.add_widget(self.status_label)
 
-        self.start_btn = Button(text="START RECORDING", size_hint_y=0.4)
-        self.start_btn.bind(on_press=self.start_session)
-        layout.add_widget(self.start_btn)
+        # Scrolling text region (40% of screen)
+        self.log_text = TextInput(
+            text='',
+            readonly=True,
+            font_size='12sp',
+            size_hint_y=0.4,
+            foreground_color=(1, 1, 1, 1),  # White text
+            background_color=(0.2, 0.2, 0.2, 1)  # Dark grey background
+        )
+        layout.add_widget(self.log_text)
 
-        self.stop_btn = Button(text="STOP", size_hint_y=0.4, disabled=True)
-        self.stop_btn.bind(on_press=self.stop_session)
-        layout.add_widget(self.stop_btn)
+        # Spacer to push everything to top
+        spacer = Label(
+            size_hint_y=1,
+            text='reserved for future use'
+        )
+        layout.add_widget(spacer)
 
         return layout
 
@@ -101,6 +132,31 @@ class ClockApp(App):
 #--            print(f"[Tier 1] Audio callback: appended {samples_count} samples (active buffer now has {len(self.active_buffer)} total)")
 
     # --- TIER 3: UI THREAD CONTROLS ---
+    def tell(self, message):
+        """Write a message to the scrolling text region and optionally to console."""
+        if platform != 'android':
+            print(message)
+        
+        # Schedule the UI update on the main thread
+        Clock.schedule_once(lambda dt: self._update_log(message), 0)
+    
+    def _update_log(self, message):
+        """Internal method to update the log text (runs on main thread)."""
+        # Add to text region with newline
+        if self.log_text.text:
+            self.log_text.text += '\n' + message
+        else:
+            self.log_text.text = message
+        
+        # Scroll to bottom (scroll_y=0 is bottom in Kivy)
+        self.log_text.scroll_y = 0
+
+    def exit_app(self, instance):
+        """Exit the application."""
+        if self.is_running:
+            self.stop_session(None)
+        self.stop()
+
     def start_session(self, instance):
         self.is_running = True
         self.buffer_a = []
@@ -141,7 +197,7 @@ class ClockApp(App):
         """Swing-buffer handler: Kivy timer is the master clock. Drain, process, and analyze whatever's in the buffer."""
         # SWAP BUFFERS FIRST: Tier 1 immediately switches to the fresh buffer
         self.active_buffer, self.inactive_buffer = self.inactive_buffer, self.active_buffer
-        print(f"[Tier 2] Buffer swap: active buffer now has {len(self.active_buffer)} samples, processing {len(self.inactive_buffer)} from inactive")
+        self.tell(f"[Tier 2] Buffer swap: active buffer now has {len(self.active_buffer)} samples, processing {len(self.inactive_buffer)} from inactive")
         
         # Take all accumulated data from the (now-frozen) inactive buffer
         chunk_to_save = self.inactive_buffer.copy()
@@ -157,18 +213,18 @@ class ClockApp(App):
             # Thread 1: Save raw audio CSV
             threading.Thread(
                 target=save_csv_worker, 
-                args=(chunk_to_save, timestamp), 
+                args=(self, chunk_to_save, timestamp), 
                 daemon=True
             ).start()
             
             # Thread 2: Compute and save histogram
             threading.Thread(
                 target=save_histogram_worker, 
-                args=(chunk_to_save, timestamp), 
+                args=(self, chunk_to_save, timestamp), 
                 daemon=True
             ).start()
             
-            self.status_label.text = f"Recording...\nLast CSV: {timestamp}"
+            self.status_label.text = f"Recording... Last CSV: {timestamp}"
 
 if __name__ == '__main__':
     ClockApp().run()
