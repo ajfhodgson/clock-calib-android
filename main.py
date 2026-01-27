@@ -158,6 +158,7 @@ class ClockApp(App):
         self.stop()
 
     def start_session(self, instance):
+        print("DEBUG: Start button clicked!") # This SHOULD show up in logcat
         self.is_running = True
         self.buffer_a = []
         self.buffer_b = []
