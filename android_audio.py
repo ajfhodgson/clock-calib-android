@@ -5,6 +5,7 @@ from android.permissions import request_permissions, Permission
 AudioRecord = autoclass('android.media.AudioRecord')
 AudioFormat = autoclass('android.media.AudioFormat')
 MediaRecorder = autoclass('android.media.MediaRecorder')
+AudioSource = autoclass('android.media.MediaRecorder$AudioSource') # Note the $ sign
 
 class AndroidMic:
     def __init__(self, sample_rate=44100):
@@ -15,15 +16,16 @@ class AndroidMic:
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT
         )
-        
+
         # Initialize the recorder
         self.recorder = AudioRecord(
-            MediaRecorder.AudioSource.MIC,
+            AudioSource.MIC,  # Use the new AudioSource variable directly
             sample_rate,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
             self.buffer_size
         )
+        
 
     def start(self):
         self.recorder.startRecording()
@@ -38,4 +40,3 @@ class AndroidMic:
     def stop(self):
         self.recorder.stop()
         self.recorder.release()
-        
