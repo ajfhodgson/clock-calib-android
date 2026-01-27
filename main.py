@@ -94,7 +94,7 @@ class ClockApp(App):
 
         # Status label
         self.status_label = Label(
-            text="Ready to Record: Chunking at 4s. Press Start.", 
+            text="Ready to Record. Press Start.", 
             halign='center', font_size='12sp',
             size_hint_y=0.15
         )
