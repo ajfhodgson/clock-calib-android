@@ -5,17 +5,10 @@ from kivy.uix.label import Label
 from kivy.uix.button import Button
 from kivy.uix.textinput import TextInput
 from kivy.clock import Clock
-from kivy.utils import platform 
-if platform == 'android':
-    from android_audio import AndroidMic  # homebrew shim for android to look like Windows sounddevice
-    from android.permissions import request_permissions, Permission # type: ignore
-    request_permissions([Permission.RECORD_AUDIO])
-    mic = AndroidMic(sample_rate=44100)
-    mic.start()
-else:
-    import sounddevice as sd
+from kivy.utils import platform
 import threading
 import csv
+import os
 from datetime import datetime
 
 # --- TIER 2: ANALYSIS & I/O WORKER ---
@@ -23,8 +16,10 @@ def save_csv_worker(app, data_chunk, timestamp):
     """Writes the 4s buffer to a CSV file in a background thread."""
     filename = f"clock_log_{timestamp}.csv"
     try:
+        # Use Android-safe directory path
+        filepath = os.path.join(App.get_running_app().user_data_dir, filename)
         # We use a context manager to ensure the file closes properly
-        with open(filename, 'w', newline='') as f:
+        with open(filepath, 'w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(["Amplitude"])
             # Writing as a column for easy Excel analysis
@@ -37,6 +32,8 @@ def save_histogram_worker(app, data_chunk, timestamp):
     """Computes and writes histogram binning to a CSV file in a background thread."""
     filename = f"bins_{timestamp}.csv"
     try:
+        # Use Android-safe directory path
+        filepath = os.path.join(App.get_running_app().user_data_dir, filename)
         # Convert to numpy array and take absolute values
         data_array = np.abs(np.array(data_chunk))
         max_val = np.max(data_array) if len(data_array) > 0 else 1.0
@@ -46,7 +43,7 @@ def save_histogram_worker(app, data_chunk, timestamp):
         counts, bin_edges = np.histogram(data_array, bins=100, range=(0, max_val))
         
         # Write histogram to CSV: bin_number, max_value_of_bin, count, percentage
-        with open(filename, 'w', newline='') as f:
+        with open(filepath, 'w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(["Bin", "Max_Value", "Count", "Percentage"])
             for bin_num, (bin_max, count) in enumerate(zip(bin_edges[1:], counts)):
@@ -158,7 +155,7 @@ class ClockApp(App):
         self.stop()
 
     def start_session(self, instance):
-        print("DEBUG: Start button clicked!") # This SHOULD show up in logcat
+        self.tell("Start button clicked...")
         self.is_running = True
         self.buffer_a = []
         self.buffer_b = []
@@ -167,18 +164,41 @@ class ClockApp(App):
         self.start_btn.disabled = True
         self.stop_btn.disabled = False
         self.status_label.text = "Recording Active..."
+        self.stream = None
+        self.mic = None
 
-        # Initialize and start SoundDevice stream
         try:
-            self.stream = sd.InputStream(
-                samplerate=self.sample_rate, 
-                channels=1, 
-                callback=self.audio_callback
-            )
-            self.stream.start()
+            if platform == 'android':
+                # Request audio permissions on Android
+                from android.permissions import request_permissions, Permission
+                request_permissions([Permission.RECORD_AUDIO])
+                self.tell("[Android] Audio permission requested")
+                
+                # Use the custom Android class we built
+                from android_audio import AndroidMic
+                self.mic = AndroidMic(sample_rate=self.sample_rate)
+                self.tell("[Android] AndroidMic initialized, starting callback loop...")
+                # Pass the callback to the Android version
+                self.mic.start(callback=self.audio_callback)
+                self.tell("[Android] AndroidMic started")
+            else:
+                # Use SoundDevice for Windows/Mac
+                import sounddevice as sd
+                self.tell("[SoundDevice] Initializing stream...")
+                self.stream = sd.InputStream(
+                    samplerate=self.sample_rate, 
+                    channels=1, 
+                    callback=self.audio_callback
+                )
+                self.stream.start()
+                self.tell("[SoundDevice] Stream started")
+
             # Schedule the Tier 2 Analysis/Export every 4 seconds
             Clock.schedule_interval(self.process_buffer, self.window_duration)
+            self.tell("[Main] Buffer processing scheduled")
+            
         except Exception as e:
+            self.tell(f"CRITICAL ERROR: {e}")
             self.status_label.text = f"Mic Error: {e}"
             self.stop_session(None)
 
@@ -188,6 +208,9 @@ class ClockApp(App):
             self.stream.stop()
             self.stream.close()
             self.stream = None
+        if hasattr(self, 'mic') and self.mic:
+            self.mic.stop()
+            self.mic = None
         
         Clock.unschedule(self.process_buffer)
         self.start_btn.disabled = False
