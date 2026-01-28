@@ -9,8 +9,11 @@ AudioSource = autoclass('android.media.MediaRecorder$AudioSource') # Note the $ 
 
 class AndroidMic:
     def __init__(self, sample_rate=44100):
+        print("PYTHON: Initializing AudioSource...")
         self.sample_rate = sample_rate
+
         # Define the buffer size for the hardware
+        print("PYTHON: Getting Min Buffer Size...")
         self.buffer_size = AudioRecord.getMinBufferSize(
             sample_rate,
             AudioFormat.CHANNEL_IN_MONO,
@@ -18,6 +21,7 @@ class AndroidMic:
         )
 
         # Initialize the recorder
+        print(f"PYTHON: Creating AudioRecord object (Buffer: {self.buffer_size})...")
         self.recorder = AudioRecord(
             AudioSource.MIC,  # Use the new AudioSource variable directly
             sample_rate,
@@ -25,6 +29,7 @@ class AndroidMic:
             AudioFormat.ENCODING_PCM_16BIT,
             self.buffer_size
         )
+        print("PYTHON: AudioRecord created successfully!")
         
 
     def start(self):
