@@ -60,6 +60,9 @@ class AndroidMic:
                 # Convert to numpy array (as int16, matching PCM_16BIT)
                 audio_data = np.array(buffer, dtype=np.int16)
                 
+                # Normalize to float32 in range -1.0..1.0 (matching sounddevice format)
+                audio_data = audio_data.astype(np.float32) / 32768.0
+                
                 # Reshape to match sounddevice format: (frames, channels)
                 audio_data = audio_data.reshape(-1, 1)
                 

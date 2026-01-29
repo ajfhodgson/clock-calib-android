@@ -14,7 +14,7 @@ from datetime import datetime
 # --- TIER 2: ANALYSIS & I/O WORKER ---
 def save_csv_worker(app, data_chunk, timestamp):
     """Writes the 4s buffer to a CSV file in a background thread."""
-    filename = f"clock_log_{timestamp}.csv"
+    filename = f"amps_{timestamp}.csv"
     try:
         # Use Android-safe directory path
         filepath = os.path.join(App.get_running_app().user_data_dir, filename)
@@ -24,7 +24,16 @@ def save_csv_worker(app, data_chunk, timestamp):
             writer.writerow(["Amplitude"])
             # Writing as a column for easy Excel analysis
             writer.writerows([[val] for val in data_chunk])
-        app.tell(f"[Tier 2] Successfully saved {len(data_chunk)} samples to {filename}")
+        
+        # Verify the file was actually created and report size
+        if os.path.exists(filepath):
+            file_size = os.path.getsize(filepath)
+            if file_size > 0:
+                app.tell(f"[Tier 2] Successfully saved {len(data_chunk)} samples to {filepath} ({file_size} bytes)")
+            else:
+                app.tell(f"[Tier 2] ERROR: File created but empty - {filepath} (0 bytes)")
+        else:
+            app.tell(f"[Tier 2] ERROR: File does not exist - {filepath}")
     except Exception as e:
         app.tell(f"[Tier 2] I/O Error: {e}")
 
@@ -49,7 +58,16 @@ def save_histogram_worker(app, data_chunk, timestamp):
             for bin_num, (bin_max, count) in enumerate(zip(bin_edges[1:], counts)):
                 percentage = (count / total_samples * 100) if total_samples > 0 else 0.0
                 writer.writerow([bin_num, bin_max, int(count), f"{percentage:.2f}"])
-        app.tell(f"[Tier 2] Successfully saved histogram to {filename}")
+        
+        # Verify the file was actually created and report size
+        if os.path.exists(filepath):
+            file_size = os.path.getsize(filepath)
+            if file_size > 0:
+                app.tell(f"[Tier 2] Successfully saved histogram to {filepath} ({file_size} bytes)")
+            else:
+                app.tell(f"[Tier 2] ERROR: File created but empty - {filepath} (0 bytes)")
+        else:
+            app.tell(f"[Tier 2] ERROR: File does not exist - {filepath}")
     except Exception as e:
         app.tell(f"[Tier 2] Histogram Error: {e}")
 
@@ -235,7 +253,7 @@ class ClockApp(App):
         
         # Only export if there's data to write
         if chunk_to_save:
-            timestamp = datetime.now().strftime("%H-%M-%S")
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             
             # Spin up Tier 2 Worker Threads (Daemon=True so they die if app closes)
             # Thread 1: Save raw audio CSV
