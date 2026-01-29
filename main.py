@@ -221,7 +221,11 @@ class ClockApp(App):
         """Swing-buffer handler: Kivy timer is the master clock. Drain, process, and analyze whatever's in the buffer."""
         # SWAP BUFFERS FIRST: Tier 1 immediately switches to the fresh buffer
         self.active_buffer, self.inactive_buffer = self.inactive_buffer, self.active_buffer
-        self.tell(f"[Tier 2] Buffer swap: active buffer now has {len(self.active_buffer)} samples, processing {len(self.inactive_buffer)} from inactive")
+        
+        # Calculate maximum value in the buffer
+        max_val = max(self.inactive_buffer) if self.inactive_buffer else 0
+        
+        self.tell(f"[Tier 2] Buffer swap: processing {len(self.inactive_buffer)} samples from inactive buffer (max: {max_val})")
         
         # Take all accumulated data from the (now-frozen) inactive buffer
         chunk_to_save = self.inactive_buffer.copy()
