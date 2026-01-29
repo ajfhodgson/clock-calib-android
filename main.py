@@ -11,29 +11,72 @@ import csv
 import os
 from datetime import datetime
 
+# --- HELPER FUNCTIONS FOR FILE I/O ---
+def get_save_directory():
+    """Get the appropriate save directory based on platform."""
+    if platform == 'android':
+        # Use jnius to get the Downloads directory on Android
+        try:
+            from jnius import autoclass
+            Environment = autoclass('android.os.Environment')
+            Downloads = Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_DOWNLOADS
+            )
+            base_dir = Downloads.getAbsolutePath()
+        except Exception:
+            # Fallback to hardcoded path if jnius fails
+            base_dir = '/sdcard/Download'
+    else:
+        # Windows/other: use standard roaming APPDATA folder
+        base_dir = os.path.join(os.environ.get('APPDATA', App.get_running_app().user_data_dir), 'clock-calib')
+    
+    os.makedirs(base_dir, exist_ok=True)
+    return base_dir
+
+def verify_and_report_file(app, filepath, num_samples=None):
+    """Verify file exists, get size, and report via app.tell()."""
+    if os.path.exists(filepath):
+        file_size = os.path.getsize(filepath)
+        if file_size > 0:
+            if num_samples is not None:
+                app.tell(f"[Tier 2] Successfully saved {num_samples} samples to {filepath} ({file_size} bytes)")
+            else:
+                app.tell(f"[Tier 2] Successfully saved to {filepath} ({file_size} bytes)")
+        else:
+            app.tell(f"[Tier 2] ERROR: File created but empty - {filepath} (0 bytes)")
+    else:
+        app.tell(f"[Tier 2] ERROR: File does not exist - {filepath}")
+
 # --- TIER 2: ANALYSIS & I/O WORKER ---
 def save_csv_worker(app, data_chunk, timestamp):
     """Writes the 4s buffer to a CSV file in a background thread."""
     filename = f"amps_{timestamp}.csv"
     try:
-        # Use Android-safe directory path
-        filepath = os.path.join(App.get_running_app().user_data_dir, filename)
-        # We use a context manager to ensure the file closes properly
+        base_dir = get_save_directory()
+        filepath = os.path.join(base_dir, filename)
+
+        # Write CSV with time and amplitude columns
         with open(filepath, 'w', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(["Amplitude"])
-            # Writing as a column for easy Excel analysis
-            writer.writerows([[val] for val in data_chunk])
-        
-        # Verify the file was actually created and report size
-        if os.path.exists(filepath):
-            file_size = os.path.getsize(filepath)
-            if file_size > 0:
-                app.tell(f"[Tier 2] Successfully saved {len(data_chunk)} samples to {filepath} ({file_size} bytes)")
-            else:
-                app.tell(f"[Tier 2] ERROR: File created but empty - {filepath} (0 bytes)")
-        else:
-            app.tell(f"[Tier 2] ERROR: File does not exist - {filepath}")
+            # Write header with time (ms since program start) then amplitude
+            writer.writerow(["Time_ms", "Amplitude"])
+            # Dead-reckon times from app.samples_written using app.sample_rate
+            rows = []
+            sr = getattr(app, 'sample_rate', 44100)
+            start_idx = getattr(app, 'samples_written', 0)
+            for i, val in enumerate(data_chunk):
+                # time in milliseconds since app start, formatted to 3 decimal places
+                time_ms = (start_idx + i) / float(sr) * 1000.0
+                rows.append([f"{time_ms:.3f}", val])
+            writer.writerows(rows)
+            # Update global counter (approximate / dead-reckoned)
+            try:
+                app.samples_written = start_idx + len(data_chunk)
+            except Exception:
+                pass
+
+        # Verify and report file
+        verify_and_report_file(app, filepath, num_samples=len(data_chunk))
     except Exception as e:
         app.tell(f"[Tier 2] I/O Error: {e}")
 
@@ -41,8 +84,9 @@ def save_histogram_worker(app, data_chunk, timestamp):
     """Computes and writes histogram binning to a CSV file in a background thread."""
     filename = f"bins_{timestamp}.csv"
     try:
-        # Use Android-safe directory path
-        filepath = os.path.join(App.get_running_app().user_data_dir, filename)
+        base_dir = get_save_directory()
+        filepath = os.path.join(base_dir, filename)
+
         # Convert to numpy array and take absolute values
         data_array = np.abs(np.array(data_chunk))
         max_val = np.max(data_array) if len(data_array) > 0 else 1.0
@@ -51,23 +95,16 @@ def save_histogram_worker(app, data_chunk, timestamp):
         # Create 100 bins from 0 to max_val
         counts, bin_edges = np.histogram(data_array, bins=100, range=(0, max_val))
         
-        # Write histogram to CSV: bin_number, max_value_of_bin, count, percentage
+        # Write histogram to CSV
         with open(filepath, 'w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(["Bin", "Max_Value", "Count", "Percentage"])
             for bin_num, (bin_max, count) in enumerate(zip(bin_edges[1:], counts)):
                 percentage = (count / total_samples * 100) if total_samples > 0 else 0.0
                 writer.writerow([bin_num, bin_max, int(count), f"{percentage:.2f}"])
-        
-        # Verify the file was actually created and report size
-        if os.path.exists(filepath):
-            file_size = os.path.getsize(filepath)
-            if file_size > 0:
-                app.tell(f"[Tier 2] Successfully saved histogram to {filepath} ({file_size} bytes)")
-            else:
-                app.tell(f"[Tier 2] ERROR: File created but empty - {filepath} (0 bytes)")
-        else:
-            app.tell(f"[Tier 2] ERROR: File does not exist - {filepath}")
+
+        # Verify and report file
+        verify_and_report_file(app, filepath)
     except Exception as e:
         app.tell(f"[Tier 2] Histogram Error: {e}")
 
@@ -81,6 +118,8 @@ class ClockApp(App):
         # State Management
         self.is_running = False
         self.stream = None
+        # running sample counter (dead-reckoning since app start)
+        self.samples_written = 0
         # Double-buffer (swing buffer) for lock-free operation
         self.buffer_a = []
         self.buffer_b = []
@@ -187,10 +226,10 @@ class ClockApp(App):
 
         try:
             if platform == 'android':
-                # Request audio permissions on Android
+                # Request audio and storage permissions on Android
                 from android.permissions import request_permissions, Permission
-                request_permissions([Permission.RECORD_AUDIO])
-                self.tell("[Android] Audio permission requested")
+                request_permissions([Permission.RECORD_AUDIO, Permission.WRITE_EXTERNAL_STORAGE])
+                self.tell("[Android] Audio and storage permissions requested")
                 
                 # Use the custom Android class we built
                 from android_audio import AndroidMic
