@@ -39,13 +39,13 @@ def verify_and_report_file(app, filepath, num_samples=None):
         file_size = os.path.getsize(filepath)
         if file_size > 0:
             if num_samples is not None:
-                app.tell(f"[Tier 2] Successfully saved {num_samples} samples to {filepath} ({file_size} bytes)")
+                app.tell(f"[Tier 2] Successfully saved {num_samples} samples to {filepath} ({file_size} bytes)",2)
             else:
-                app.tell(f"[Tier 2] Successfully saved to {filepath} ({file_size} bytes)")
+                app.tell(f"[Tier 2] Successfully saved to {filepath} ({file_size} bytes)",2)
         else:
-            app.tell(f"[Tier 2] ERROR: File created but empty - {filepath} (0 bytes)")
+            app.tell(f"[Tier 2] ERROR: File created but empty - {filepath} (0 bytes)",2)
     else:
-        app.tell(f"[Tier 2] ERROR: File does not exist - {filepath}")
+        app.tell(f"[Tier 2] ERROR: File does not exist - {filepath}",2)
 
 # --- TIER 2: ANALYSIS & I/O WORKER ---
 def save_csv_worker(app, data_chunk, timestamp):
@@ -119,7 +119,7 @@ class ClockApp(App):
         self.sample_rate = 44100
         self.window_duration = 4.0 
         self.samples_per_window = int(self.sample_rate * self.window_duration)
-        self.tell_mask = 1         # Controls which tell() messages are emitted; bitmask flags (default: just bit 0 = 1)
+        self.tell_mask = 7         # Controls which tell() messages are emitted; bitmask flags (default: just bit 0 = 1)
         
         # State Management
         self.is_running = False
@@ -236,7 +236,7 @@ class ClockApp(App):
         """Write a message to the scrolling text region and optionally to console.
         Only outputs if bit mask_bit is set in `self.tell_mask`.
         """
-        # If the requested flag bit(s) are not set in tell_mask, skip output
+        # If the requested mask_bit is not set in tell_mask, skip output
         try:
             if not ((1 << mask_bit) & getattr(self, 'tell_mask', 1)):
                 return
@@ -247,7 +247,7 @@ class ClockApp(App):
             print(message)
         
         # Schedule the UI update on the main thread
-        Clock.schedule_once(lambda dt: self._update_log(message), 0)
+        Clock.schedule_once(lambda dt: self._update_log( str(mask_bit) + ': ' + message ), 0)
     
     def _update_log(self, message):
         """Internal method to update the log text (runs on main thread)."""
@@ -325,7 +325,7 @@ class ClockApp(App):
             self.tell_input.text = str(self.tell_mask)
             return
         self.tell_mask = val
-        self.tell(f"[UI] Tell mask set to {self.tell_mask}", flag=1)
+        self.tell(f"[UI] Tell mask set to {self.tell_mask}", 1)
 
     def on_tell_focus(self, instance, value):
         if not value:
@@ -419,7 +419,7 @@ class ClockApp(App):
         # Calculate maximum value in the buffer
         max_val = max(self.inactive_buffer) if self.inactive_buffer else 0
         
-        self.tell(f"[Tier 2] Buffer swap: processing {len(self.inactive_buffer)} samples from inactive buffer (max: {max_val})")
+        self.tell(f"[Tier 2] Buffer swap: processing {len(self.inactive_buffer)} samples from inactive buffer (max: {max_val})", 1)
         
         # Take all accumulated data from the (now-frozen) inactive buffer
         chunk_to_save = self.inactive_buffer.copy()
