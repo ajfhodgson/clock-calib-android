@@ -119,9 +119,7 @@ class ClockApp(App):
         self.sample_rate = 44100
         self.window_duration = 4.0 
         self.samples_per_window = int(self.sample_rate * self.window_duration)
-
-        # Controls which tell() messages are emitted; bitmask flags (default: just bit 0 = 1)
-        self.tell_mask = 1
+        self.tell_mask = 1         # Controls which tell() messages are emitted; bitmask flags (default: just bit 0 = 1)
         
         # State Management
         self.is_running = False

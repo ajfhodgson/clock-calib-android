@@ -1,5 +1,5 @@
 *.csv
-
+*.xlsx
 # Virtual environment (local)
 venv/
 
