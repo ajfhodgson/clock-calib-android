@@ -108,12 +108,20 @@ def save_histogram_worker(app, data_chunk, timestamp):
     except Exception as e:
         app.tell(f"[Tier 2] Histogram Error: {e}")
 
+#############################################-----------------------------------------------
+
 class ClockApp(App):
     def build(self):
         # Configuration
+        # defaults
+        self.target_bph = 0
+        self.peak_thresh_pc = 0.1
         self.sample_rate = 44100
         self.window_duration = 4.0 
         self.samples_per_window = int(self.sample_rate * self.window_duration)
+
+        # Controls which tell() messages are emitted; bitmask flags (default: just bit 0 = 1)
+        self.tell_mask = 1
         
         # State Management
         self.is_running = False
@@ -129,8 +137,8 @@ class ClockApp(App):
         # UI Setup
         layout = BoxLayout(orientation='vertical', padding=30, spacing=20)
         
-        # Buttons layout - horizontal at top
-        buttons_layout = BoxLayout(orientation='horizontal', size_hint_y=0.15, spacing=10)
+        # Buttons layout - horizontal at top (10% height)
+        buttons_layout = BoxLayout(orientation='horizontal', size_hint_y=0.10, spacing=10)
         
         self.start_btn = Button(text="Start", size_hint_x=1)
         self.start_btn.bind(on_press=self.start_session)
@@ -146,11 +154,51 @@ class ClockApp(App):
         
         layout.add_widget(buttons_layout)
 
-        # Status label
+        # Entry fields row - horizontal (10% height)
+        entries_layout = BoxLayout(orientation='horizontal', size_hint_y=0.10, spacing=10)
+
+        # Window Size (seconds)
+        ws_box = BoxLayout(orientation='vertical')
+        ws_box.add_widget(Label(text='Window Size (s)', size_hint_y=None, height='20dp'))
+        self.win_input = TextInput(text=str(self.window_duration), multiline=False, input_filter='float', size_hint_y=None, height='36dp')
+        self.win_input.bind(on_text_validate=self.on_window_input, on_focus=self.on_window_focus)
+        ws_box.add_widget(self.win_input)
+        entries_layout.add_widget(ws_box)
+
+        # Target BPH
+        tb_box = BoxLayout(orientation='vertical')
+        tb_box.add_widget(Label(text='Target BPH', size_hint_y=None, height='20dp'))
+        self.bph_input = TextInput(text=str(getattr(self, 'target_bph', 0)), multiline=False, input_filter='int', size_hint_y=None, height='36dp')
+        self.bph_input.bind(on_text_validate=self.on_bph_input, on_focus=self.on_bph_focus)
+        tb_box.add_widget(self.bph_input)
+        entries_layout.add_widget(tb_box)
+
+        # Peak Threshold %
+        pt_box = BoxLayout(orientation='vertical')
+        pt_box.add_widget(Label(text='Peak Threshold %', size_hint_y=None, height='20dp'))
+        self.peak_input = TextInput(text=str(getattr(self, 'peak_thresh_pc', 0.1)), multiline=False, input_filter='float', size_hint_y=None, height='36dp')
+        self.peak_input.bind(on_text_validate=self.on_peak_input, on_focus=self.on_peak_focus)
+        pt_box.add_widget(self.peak_input)
+        entries_layout.add_widget(pt_box)
+
+        # Tell mask (bitmask input)
+        ts_box = BoxLayout(orientation='vertical')
+        ts_box.add_widget(Label(text='Tell mask', size_hint_y=None, height='20dp'))
+        self.tell_input = TextInput(text=str(getattr(self, 'tell_mask', 1)), multiline=False, input_filter='int', size_hint_y=None, height='36dp')
+        self.tell_input.bind(on_text_validate=self.on_tell_input, on_focus=self.on_tell_focus)
+        ts_box.add_widget(self.tell_input)
+        entries_layout.add_widget(ts_box)
+
+        layout.add_widget(entries_layout)
+
+        # Enable inputs (start disabled when recording)
+        self.set_inputs_enabled(True)
+
+        # Status label (10% height)
         self.status_label = Label(
             text="Ready to Record. Press Start.", 
             halign='center', font_size='12sp',
-            size_hint_y=0.15
+            size_hint_y=0.10
         )
         layout.add_widget(self.status_label)
 
@@ -186,8 +234,17 @@ class ClockApp(App):
 #--            print(f"[Tier 1] Audio callback: appended {samples_count} samples (active buffer now has {len(self.active_buffer)} total)")
 
     # --- TIER 3: UI THREAD CONTROLS ---
-    def tell(self, message):
-        """Write a message to the scrolling text region and optionally to console."""
+    def tell(self, message, mask_bit=0):
+        """Write a message to the scrolling text region and optionally to console.
+        Only outputs if bit mask_bit is set in `self.tell_mask`.
+        """
+        # If the requested flag bit(s) are not set in tell_mask, skip output
+        try:
+            if not ((1 << mask_bit) & getattr(self, 'tell_mask', 1)):
+                return
+        except Exception:
+            pass
+
         if platform != 'android':
             print(message)
         
@@ -211,6 +268,84 @@ class ClockApp(App):
             self.stop_session(None)
         self.stop()
 
+    # --- UI input handlers ---
+    def _parse_float(self, text, default):
+        try:
+            return float(text)
+        except Exception:
+            return default
+
+    def _parse_int(self, text, default):
+        try:
+            return int(float(text))
+        except Exception:
+            return default
+
+    def _set_window_duration(self, text):
+        val = self._parse_float(text, self.window_duration)
+        if val <= 0:
+            self.tell("[UI] Invalid window duration, keeping previous value")
+            self.win_input.text = str(self.window_duration)
+            return
+        self.window_duration = val
+        self.samples_per_window = int(self.sample_rate * self.window_duration)
+        self.tell(f"[UI] Window duration set to {self.window_duration}s")
+        if self.is_running:
+            Clock.unschedule(self.process_buffer)
+            Clock.schedule_interval(self.process_buffer, self.window_duration)
+            self.tell("[UI] Rescheduled buffer processing to new window duration")
+
+    def on_window_input(self, instance):
+        self._set_window_duration(instance.text)
+
+    def on_window_focus(self, instance, value):
+        if not value:
+            self._set_window_duration(instance.text)
+
+    def on_bph_input(self, instance):
+        val = self._parse_int(instance.text, self.target_bph)
+        self.target_bph = val
+        self.tell(f"[UI] Target BPH set to {self.target_bph}")
+
+    def on_bph_focus(self, instance, value):
+        if not value:
+            self.on_bph_input(instance)
+
+    def on_peak_input(self, instance):
+        val = self._parse_float(instance.text, self.peak_thresh_pc)
+        self.peak_thresh_pc = val
+        self.tell(f"[UI] Peak threshold set to {self.peak_thresh_pc}%")
+
+    def on_peak_focus(self, instance, value):
+        if not value:
+            self.on_peak_input(instance)
+
+    def on_tell_input(self, instance):
+        val = self._parse_int(instance.text, getattr(self, 'tell_mask', 1))
+        if val < 0:
+            self.tell("[UI] Invalid tell mask value; must be non-negative")
+            self.tell_input.text = str(self.tell_mask)
+            return
+        self.tell_mask = val
+        self.tell(f"[UI] Tell mask set to {self.tell_mask}", flag=1)
+
+    def on_tell_focus(self, instance, value):
+        if not value:
+            self.on_tell_input(instance)
+
+    def set_inputs_enabled(self, enabled: bool):
+        """Enable/disable the three entry inputs and adjust appearance."""
+        # TextInput has 'disabled', 'background_color', and 'foreground_color'
+        bg_enabled = (1, 1, 1, 1)
+        bg_disabled = (0.9, 0.9, 0.9, 1)
+        fg_enabled = (0, 0, 0, 1)
+        fg_disabled = (0.5, 0.5, 0.5, 1)
+
+        for widget in (self.win_input, self.bph_input, self.peak_input, self.tell_input):
+            widget.disabled = not enabled
+            widget.background_color = bg_enabled if enabled else bg_disabled
+            widget.foreground_color = fg_enabled if enabled else fg_disabled
+
     def start_session(self, instance):
         self.tell("Start button clicked...")
         self.is_running = True
@@ -220,6 +355,8 @@ class ClockApp(App):
         self.inactive_buffer = self.buffer_b
         self.start_btn.disabled = True
         self.stop_btn.disabled = False
+        # Disable inputs while running
+        self.set_inputs_enabled(False)
         self.status_label.text = "Recording Active..."
         self.stream = None
         self.mic = None
@@ -272,6 +409,8 @@ class ClockApp(App):
         Clock.unschedule(self.process_buffer)
         self.start_btn.disabled = False
         self.stop_btn.disabled = True
+        # Re-enable inputs when stopped
+        self.set_inputs_enabled(True)
         self.status_label.text = "Stopped. Check project folder for CSVs."
 
     def process_buffer(self, dt):
