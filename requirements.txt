@@ -1,0 +1,6 @@
+# Minimal requirements — update/pin versions by running `pip freeze > requirements.txt` on a working machine
+kivy
+numpy
+sounddevice
+pyjnius
+# If you used other packages, run `pip freeze` in the working venv and replace this file with the exact pins.

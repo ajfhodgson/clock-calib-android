@@ -1,1 +1,8 @@
 *.csv
+
+# Virtual environment (local)
+venv/
+
+# Bytecode caches
+__pycache__/
+*.pyc
