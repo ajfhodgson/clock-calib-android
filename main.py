@@ -116,7 +116,7 @@ def save_histogram_worker(app, data_chunk, timestamp):
 class ClockApp(App):
     def build(self):
         if platform != 'android':
-            Window.size = (250, 750)
+            Window.size = (352, 750)
 
         # Configuration
         # defaults
@@ -170,45 +170,45 @@ class ClockApp(App):
 
         # Window Size (seconds)
         ws_box = BoxLayout(orientation='horizontal')
-        l1 = Label(text='Window (s)', size_hint_x=1.0)
-        autoscale(l1, 0.7)
+        l1 = Label(text='Chunk\n(sec)', size_hint_x=1.0)
+        autoscale(l1, 0.3)
         ws_box.add_widget(l1)
 
         self.win_input = TextInput(text=str(self.window_duration), multiline=False, input_filter='float', size_hint_x=0.9)
-        autoscale(self.win_input, 0.6)
+        autoscale(self.win_input, 0.4)
         self.win_input.bind(on_text_validate=self.on_window_input, on_focus=self.on_window_focus)
         ws_box.add_widget(self.win_input)
         entries_layout.add_widget(ws_box)
 
         # Target BPH
         tb_box = BoxLayout(orientation='horizontal')
-        l2 = Label(text='Tgt BPH', size_hint_x=1.0)
-        autoscale(l2, 0.7)
+        l2 = Label(text='Tgt\nBPH', size_hint_x=1.0)
+        autoscale(l2, 0.3)
         tb_box.add_widget(l2)
         self.bph_input = TextInput(text=str(getattr(self, 'target_bph', 0)), multiline=False, input_filter='int', size_hint_x=0.9)
-        autoscale(self.bph_input, 0.6)
+        autoscale(self.bph_input, 0.4)
         self.bph_input.bind(on_text_validate=self.on_bph_input, on_focus=self.on_bph_focus)
         tb_box.add_widget(self.bph_input)
         entries_layout.add_widget(tb_box)
 
         # Peak Threshold %
         pt_box = BoxLayout(orientation='horizontal')
-        l3 = Label(text='Peaks %', size_hint_x=1.0)
-        autoscale(l3, 0.7)
+        l3 = Label(text='Peaks\n(%)', size_hint_x=1.0)
+        autoscale(l3, 0.3)
         pt_box.add_widget(l3)
         self.peak_input = TextInput(text=str(getattr(self, 'peak_thresh_pc', 0.1)), multiline=False, input_filter='float', size_hint_x=0.9)
-        autoscale(self.peak_input, 0.6)
+        autoscale(self.peak_input, 0.4)
         self.peak_input.bind(on_text_validate=self.on_peak_input, on_focus=self.on_peak_focus)
         pt_box.add_widget(self.peak_input)
         entries_layout.add_widget(pt_box)
 
         # Tell mask (bitmask input)
         ts_box = BoxLayout(orientation='horizontal')
-        l4 = Label(text='Tell mask', size_hint_x=1.0)
-        autoscale(l4, 0.7)
+        l4 = Label(text='Tell\nmask', size_hint_x=1.0)
+        autoscale(l4, 0.3)
         ts_box.add_widget(l4)
         self.tell_input = TextInput(text=str(getattr(self, 'tell_mask', 1)), multiline=False, input_filter='int', size_hint_x=0.9)
-        autoscale(self.tell_input, 0.6)
+        autoscale(self.tell_input, 0.4)
         self.tell_input.bind(on_text_validate=self.on_tell_input, on_focus=self.on_tell_focus)
         ts_box.add_widget(self.tell_input)
         entries_layout.add_widget(ts_box)
