@@ -14,6 +14,14 @@ import csv
 import os
 from datetime import datetime
 
+#&&ToDo - avoid the crash after first run/request for microphone permission on Android
+#&&ToDo - ensure there is a timestamp (ms since pressing Start) with the amplitude data in CSV
+#&&ToDO - Generate an array of peaks with their timestamps for later analysis
+#&&ToDo - Add a scrolling plot of the received amplitudes, marking the detected peaks
+#&&ToDo - numpy.Autocorellate to detect frequency of the pulse trains (should also indicate beat error)
+#&&ToDo - Decide whether each peak is a 'tick' or a 'tock' based on timing
+
+
 # --- HELPER FUNCTIONS FOR FILE I/O ---
 def get_save_directory():
     """Get the appropriate save directory based on platform."""
@@ -51,8 +59,8 @@ def verify_and_report_file(app, filepath, num_samples=None):
         app.tell(f"[Tier 2] ERROR: File does not exist - {filepath}",2)
 
 # --- TIER 2: ANALYSIS & I/O WORKER ---
-def save_csv_worker(app, data_chunk, timestamp):
-    """Writes the 4s buffer to a CSV file in a background thread."""
+def save_csv_worker(app, data_chunk, chunk_times, timestamp):
+    """Writes the ms-timestamped chunk to a CSV file in a background thread."""
     filename = f"amps_{timestamp}.csv"
     try:
         base_dir = get_save_directory()
@@ -61,22 +69,13 @@ def save_csv_worker(app, data_chunk, timestamp):
         # Write CSV with time and amplitude columns
         with open(filepath, 'w', newline='') as f:
             writer = csv.writer(f)
-            # Write header with time (ms since program start) then amplitude
+            # Write header with time (ms since start button pressed) then amplitude
             writer.writerow(["Time_ms", "Amplitude"])
-            # Dead-reckon times from app.samples_written using app.sample_rate
             rows = []
-            sr = getattr(app, 'sample_rate', 44100)
-            start_idx = getattr(app, 'samples_written', 0)
             for i, val in enumerate(data_chunk):
-                # time in milliseconds since app start, formatted to 3 decimal places
-                time_ms = (start_idx + i) / float(sr) * 1000.0
-                rows.append([f"{time_ms:.3f}", val])
+                rows.append([chunk_times[i], val])
             writer.writerows(rows)
             # Update global counter (approximate / dead-reckoned)
-            try:
-                app.samples_written = start_idx + len(data_chunk)
-            except Exception:
-                pass
 
         # Verify and report file
         verify_and_report_file(app, filepath, num_samples=len(data_chunk))
@@ -90,8 +89,8 @@ def save_histogram_worker(app, data_chunk, timestamp):
         base_dir = get_save_directory()
         filepath = os.path.join(base_dir, filename)
 
-        # Convert to numpy array and take absolute values
-        data_array = np.abs(np.array(data_chunk))
+        # Take absolute values
+        data_array = np.abs(data_chunk)
         max_val = np.max(data_array) if len(data_array) > 0 else 1.0
         total_samples = len(data_array)
         
@@ -130,8 +129,8 @@ class ClockApp(App):
         # State Management
         self.is_running = False
         self.stream = None
-        # running sample counter (dead-reckoning since app start)
-        self.samples_written = 0
+        self.ms_since_start = 0.0  # running ms counter (dead-reckoning since Start pressed)
+
         # Double-buffer (swing buffer) for lock-free operation
         self.buffer_a = []
         self.buffer_b = []
@@ -254,6 +253,20 @@ class ClockApp(App):
         layout.add_widget(spacer)
 
         self.tell(f"[Init] Screen Size: {Window.size}")
+
+        # Attempt to delete old CSVs on startup
+        try:
+            save_dir = get_save_directory()
+            self.tell(f"[Init] Logs written to: {save_dir}", 1)
+            for filename in os.listdir(save_dir):
+                if filename.lower().endswith(".csv"):
+                    try:
+                        os.remove(os.path.join(save_dir, filename))
+                        self.tell(f"[Init] Deleted old file: {filename}", 1)
+                    except Exception as e:
+                        self.tell(f"[Init] Could not delete {filename}: {e}", 1)
+        except Exception as e:
+            self.tell(f"[Init] Error accessing save directory: {e}")
 
         return layout
 
@@ -388,6 +401,7 @@ class ClockApp(App):
     def start_session(self, instance):
         self.tell("Start button clicked...")
         self.is_running = True
+        self.ms_since_start = 0.0
         self.buffer_a = []
         self.buffer_b = []
         self.active_buffer = self.buffer_a
@@ -456,38 +470,38 @@ class ClockApp(App):
         """Swing-buffer handler: Kivy timer is the master clock. Drain, process, and analyze whatever's in the buffer."""
         # SWAP BUFFERS FIRST: Tier 1 immediately switches to the fresh buffer
         self.active_buffer, self.inactive_buffer = self.inactive_buffer, self.active_buffer
-        
-        # Calculate maximum value in the buffer
         max_val = max(self.inactive_buffer) if self.inactive_buffer else 0
-        
-        self.tell(f"[Tier 2] Buffer swap: processing {len(self.inactive_buffer)} samples from inactive buffer (max: {max_val})", 1)
+        self.tell(f"[Tier 2] Process chunk: {len(self.inactive_buffer)} samples at {len(self.inactive_buffer)/self.window_duration} Hz, (max: {max_val})", 1)
         
         # Take all accumulated data from the (now-frozen) inactive buffer
-        chunk_to_save = self.inactive_buffer.copy()
-        
-        # Clear the inactive buffer for the next cycle
+        audio_chunk = np.array(self.inactive_buffer)
+        chunk_times = self.ms_since_start + np.arange(len(audio_chunk)) * (1000.0 / self.sample_rate)
         self.inactive_buffer.clear()
         
         # Only export if there's data to write
-        if chunk_to_save:
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        if len(audio_chunk) > 0:
+
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") # wall clock time
             
             # Spin up Tier 2 Worker Threads (Daemon=True so they die if app closes)
             # Thread 1: Save raw audio CSV
             threading.Thread(
                 target=save_csv_worker, 
-                args=(self, chunk_to_save, timestamp), 
+                args=(self, audio_chunk, chunk_times, timestamp), 
                 daemon=True
             ).start()
             
             # Thread 2: Compute and save histogram
             threading.Thread(
                 target=save_histogram_worker, 
-                args=(self, chunk_to_save, timestamp), 
+                args=(self, audio_chunk, timestamp), 
                 daemon=True
             ).start()
             
             self.status_label.text = f"Recording... Last CSV: {timestamp}"
+
+            # Update the running timestamp counter
+            self.ms_since_start += (len(audio_chunk) / self.sample_rate) * 1000.0
 
 if __name__ == '__main__':
     ClockApp().run()
