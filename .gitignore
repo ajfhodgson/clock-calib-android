@@ -8,3 +8,9 @@ laptop-venv/
 # Bytecode caches
 __pycache__/
 *.pyc
+
+# Syncthing
+.stignore
+.stfolder/
+~syncthing~*
+*.sync-conflict-*
