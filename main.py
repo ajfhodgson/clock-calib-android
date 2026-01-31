@@ -8,6 +8,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.graphics import Color, Rectangle
 from kivy.clock import Clock
 from kivy.utils import platform
+from kivy.core.window import Window
 import threading
 import csv
 import os
@@ -248,6 +249,8 @@ class ClockApp(App):
             text='reserved for future use'
         )
         layout.add_widget(spacer)
+
+        self.tell(f"[Init] Screen Size: {Window.size}")
 
         return layout
 
