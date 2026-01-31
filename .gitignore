@@ -4,7 +4,7 @@
 venv/
 .venv/
 laptop-venv/
-
+*.tmp
 # Bytecode caches
 __pycache__/
 *.pyc
