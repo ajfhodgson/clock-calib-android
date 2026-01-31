@@ -59,7 +59,7 @@ def verify_and_report_file(app, filepath, num_samples=None):
         app.tell(f"[Tier 2] ERROR: File does not exist - {filepath}",2)
 
 # --- TIER 2: ANALYSIS & I/O WORKER ---
-def save_csv_worker(app, data_chunk, chunk_times, timestamp):
+def save_csv_worker(app, audio_chunk_amp, audio_chunk_ms, timestamp):
     """Writes the ms-timestamped chunk to a CSV file in a background thread."""
     filename = f"amps_{timestamp}.csv"
     try:
@@ -72,17 +72,17 @@ def save_csv_worker(app, data_chunk, chunk_times, timestamp):
             # Write header with time (ms since start button pressed) then amplitude
             writer.writerow(["Time_ms", "Amplitude"])
             rows = []
-            for i, val in enumerate(data_chunk):
-                rows.append([chunk_times[i], val])
+            for i, val in enumerate(audio_chunk_amp):
+                rows.append([audio_chunk_ms[i], val])
             writer.writerows(rows)
             # Update global counter (approximate / dead-reckoned)
 
         # Verify and report file
-        verify_and_report_file(app, filepath, num_samples=len(data_chunk))
+        verify_and_report_file(app, filepath, num_samples=len(audio_chunk_amp))
     except Exception as e:
         app.tell(f"[Tier 2] I/O Error: {e}")
 
-def save_histogram_worker(app, data_chunk, timestamp):
+def save_histogram_worker(app, audio_chunk_amp, timestamp):
     """Computes and writes histogram binning to a CSV file in a background thread."""
     filename = f"bins_{timestamp}.csv"
     try:
@@ -90,7 +90,7 @@ def save_histogram_worker(app, data_chunk, timestamp):
         filepath = os.path.join(base_dir, filename)
 
         # Take absolute values
-        data_array = np.abs(data_chunk)
+        data_array = np.abs(audio_chunk_amp)
         max_val = np.max(data_array) if len(data_array) > 0 else 1.0
         total_samples = len(data_array)
         
@@ -471,37 +471,54 @@ class ClockApp(App):
         # SWAP BUFFERS FIRST: Tier 1 immediately switches to the fresh buffer
         self.active_buffer, self.inactive_buffer = self.inactive_buffer, self.active_buffer
         max_val = max(self.inactive_buffer) if self.inactive_buffer else 0
-        self.tell(f"[Tier 2] Process chunk: {len(self.inactive_buffer)} samples at {len(self.inactive_buffer)/self.window_duration} Hz, (max: {max_val})", 1)
+        num_samples = len(self.inactive_buffer)
+        self.tell(f"[Tier 2] Process chunk: {num_samples} samples at {len(self.inactive_buffer)/self.window_duration} Hz, (max: {max_val:.4f})", 1)
         
         # Take all accumulated data from the (now-frozen) inactive buffer
-        audio_chunk = np.array(self.inactive_buffer)
-        chunk_times = self.ms_since_start + np.arange(len(audio_chunk)) * (1000.0 / self.sample_rate)
+        audio_chunk_amp = np.array(self.inactive_buffer)
         self.inactive_buffer.clear()
-        
-        # Only export if there's data to write
-        if len(audio_chunk) > 0:
+        file_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") # wall clock time
+        if num_samples > 0:
+            # calculate the ms timestamps for each samle (since Start was pressed)
+            audio_chunk_ms = self.ms_since_start + np.arange(len(audio_chunk_amp)) * (1000.0 / self.sample_rate)
 
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") # wall clock time
+            # find peaks - a) what amplitude is exceeded by only peak_thresh_pc % of samples?
+            audio_chunk_abs = np.abs(audio_chunk_amp)
+            # Create 100 bins from 0 to max_val
+            counts, bin_edges = np.histogram(audio_chunk_abs, bins=100, range=(0, max_val))
             
-            # Spin up Tier 2 Worker Threads (Daemon=True so they die if app closes)
-            # Thread 1: Save raw audio CSV
+            cumulative_percentage = 0.0 
+            for bin_num, (bin_max, count) in enumerate(zip(bin_edges[1:], counts)):
+                percentage = (count / num_samples * 100)
+                cumulative_percentage += percentage
+                if cumulative_percentage >= (100.0 - self.peak_thresh_pc):
+                    peak_threshold = bin_max
+                    break # found our threshold
+            self.tell(f"[Tier 2] Process chunk: {self.peak_thresh_pc}% of samples exceeded {peak_threshold:.4f}", 1)
+
+            mask = audio_chunk_abs >= peak_threshold
+            audio_peaks = audio_chunk_abs[mask]
+            audio_peak_ms = audio_chunk_ms[mask]
+            self.tell(f"[Tier 2] Process chunk: {len(audio_peaks)} samples left in peaks array", 1)
+            
+            # Thread 1: Save raw audio CSV in Tier 2 Worker Thread (Daemon=True so they die if app closes)
             threading.Thread(
                 target=save_csv_worker, 
-                args=(self, audio_chunk, chunk_times, timestamp), 
+                args=(self, audio_chunk_amp, audio_chunk_ms, file_timestamp), 
                 daemon=True
             ).start()
             
-            # Thread 2: Compute and save histogram
+            # Thread 2: Compute and save histogram in Tier 2 Worker Thread (Daemon=True so they die if app closes)
             threading.Thread(
                 target=save_histogram_worker, 
-                args=(self, audio_chunk, timestamp), 
+                args=(self, audio_chunk_amp, file_timestamp), 
                 daemon=True
             ).start()
             
-            self.status_label.text = f"Recording... Last CSV: {timestamp}"
+            self.status_label.text = f"Recording... Last CSV: {file_timestamp}"
 
             # Update the running timestamp counter
-            self.ms_since_start += (len(audio_chunk) / self.sample_rate) * 1000.0
+            self.ms_since_start += (len(audio_chunk_amp) / self.sample_rate) * 1000.0
 
 if __name__ == '__main__':
     ClockApp().run()
