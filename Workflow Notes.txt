@@ -1,15 +1,25 @@
-In VS Code, Run Python
+Assumes In C:\Program Files\platform-tools contains Transfer-apk.ps1:
+	$extractPath = "C:\Users\andre\Downloads\"
+	$zipPath = "C:\Users\andre\Downloads\clock-calibrator-apk.zip"
+	$apkFile = "clockcalib-0.1-arm64-v8a_armeabi-v7a-debug.apk"
+	$localApkPath = Join-Path $extractPath $apkFile
+	$adbPath = "C:\Program Files\platform-tools\adb.exe"
+	$packageName = "org.andrew.clock.clockcalib"
+
+In VS Code, Ensure correct Python interpreter (venv): On the desktop: ; On the laptop: laptop-venv (both use python 3.12.x)
+In VS Code, Open main.py and "Run Python File" - runs app on Windows
 In Vs Code, Stage and Commit changes
 In VS Code, Sync Changes - with Github (this kicks off a Build Android APK action)
-Connect Phone via USB
-In Wndows Explorer, delete downloads .zip file
-In Wndows Explorer, delete AH S10-2 / SD card / .apk file
-On Phone, Uninstall the Clock Calib app
 In Github https://github.com/ajfhodgson/clock-calib-android/actions/workflows/android.yml monitor progress
 In Github, click on the run, scroll to Artifacts
-In Github, Download clock-calibrator-apk
-In Wndows Explorer, open zipfile, copy apk file, paste to downloads folder
-In Wndows Explorer, cut apk file, paste into SD card
-On Phone, File Manager, click on apk file
-Open Powershell to C:\Program Files\platform-tools>
-In Powershell,  ./adb logcat -s python OR ./adb logcat python:I *:S
+In Github, Download clock-calibrator-apk (to C:\Users\andre\Downloads)
+
+Connect Phone via USB
+In Powershell cd C:\Program Files\platform-tools
+Transfer-apk.ps1
+	Extracts clockcalib-0.1-arm64-v8a_armeabi-v7a-debug.apk from C:\Users\andre\Downloads\clock-calibrator-apk.zip
+	Deletes zip file
+	Uninstalls org.andrew.clock.clockcalib on phone
+	Installs C:\Users\andre\Downloads\clockcalib-0.1-arm64-v8a_armeabi-v7a-debug.apk on phone
+	Deletes  C:\Users\andre\Downloads\clockcalib-0.1-arm64-v8a_armeabi-v7a-debug.apk on Windows
+	In Windows Explorer, delete AH S10-2 / SD card / .apk file

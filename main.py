@@ -4,6 +4,8 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.button import Button
 from kivy.uix.textinput import TextInput
+from kivy.uix.scrollview import ScrollView
+from kivy.graphics import Color, Rectangle
 from kivy.clock import Clock
 from kivy.utils import platform
 import threading
@@ -139,69 +141,70 @@ class ClockApp(App):
         def autoscale(widget, factor=0.5):
             widget.bind(height=lambda w, h: setattr(w, 'font_size', h * factor))
 
-        # Buttons layout - horizontal at top (10% height)
+        # Buttons layout - horizontal at top (10% height)  -------------------------------------------------
         buttons_layout = BoxLayout(orientation='horizontal', size_hint_y=0.10, spacing=10)
         
         self.start_btn = Button(text="Start", size_hint_x=1)
         self.start_btn.bind(on_press=self.start_session)
-        autoscale(self.start_btn, 0.4)
+        autoscale(self.start_btn, 0.9)
         buttons_layout.add_widget(self.start_btn)
 
         self.stop_btn = Button(text="Stop", disabled=True, size_hint_x=1)
         self.stop_btn.bind(on_press=self.stop_session)
-        autoscale(self.stop_btn, 0.4)
+        autoscale(self.stop_btn, 0.9)
         buttons_layout.add_widget(self.stop_btn)
 
         self.exit_btn = Button(text="Exit", size_hint_x=1)
         self.exit_btn.bind(on_press=self.exit_app)
-        autoscale(self.exit_btn, 0.4)
+        autoscale(self.exit_btn, 0.9)
         buttons_layout.add_widget(self.exit_btn)
         
         layout.add_widget(buttons_layout)
 
-        # Entry fields row - horizontal (10% height)
+        # Entry fields row - horizontal (10% height) -------------------------------------------------
         entries_layout = BoxLayout(orientation='horizontal', size_hint_y=0.10, spacing=10)
 
         # Window Size (seconds)
-        ws_box = BoxLayout(orientation='vertical')
-        l1 = Label(text='Window Size (s)', size_hint_y=0.4)
+        ws_box = BoxLayout(orientation='horizontal')
+        l1 = Label(text='Window (s)', size_hint_x=1.0)
         autoscale(l1, 0.7)
         ws_box.add_widget(l1)
-        self.win_input = TextInput(text=str(self.window_duration), multiline=False, input_filter='float', size_hint_y=0.6)
-        autoscale(self.win_input, 0.5)
+
+        self.win_input = TextInput(text=str(self.window_duration), multiline=False, input_filter='float', size_hint_x=0.9)
+        autoscale(self.win_input, 0.6)
         self.win_input.bind(on_text_validate=self.on_window_input, on_focus=self.on_window_focus)
         ws_box.add_widget(self.win_input)
         entries_layout.add_widget(ws_box)
 
         # Target BPH
-        tb_box = BoxLayout(orientation='vertical')
-        l2 = Label(text='Target BPH', size_hint_y=0.4)
+        tb_box = BoxLayout(orientation='horizontal')
+        l2 = Label(text='Tgt BPH', size_hint_x=1.0)
         autoscale(l2, 0.7)
         tb_box.add_widget(l2)
-        self.bph_input = TextInput(text=str(getattr(self, 'target_bph', 0)), multiline=False, input_filter='int', size_hint_y=0.6)
-        autoscale(self.bph_input, 0.5)
+        self.bph_input = TextInput(text=str(getattr(self, 'target_bph', 0)), multiline=False, input_filter='int', size_hint_x=0.9)
+        autoscale(self.bph_input, 0.6)
         self.bph_input.bind(on_text_validate=self.on_bph_input, on_focus=self.on_bph_focus)
         tb_box.add_widget(self.bph_input)
         entries_layout.add_widget(tb_box)
 
         # Peak Threshold %
-        pt_box = BoxLayout(orientation='vertical')
-        l3 = Label(text='Peak Threshold %', size_hint_y=0.4)
+        pt_box = BoxLayout(orientation='horizontal')
+        l3 = Label(text='Peaks %', size_hint_x=1.0)
         autoscale(l3, 0.7)
         pt_box.add_widget(l3)
-        self.peak_input = TextInput(text=str(getattr(self, 'peak_thresh_pc', 0.1)), multiline=False, input_filter='float', size_hint_y=0.6)
-        autoscale(self.peak_input, 0.5)
+        self.peak_input = TextInput(text=str(getattr(self, 'peak_thresh_pc', 0.1)), multiline=False, input_filter='float', size_hint_x=0.9)
+        autoscale(self.peak_input, 0.6)
         self.peak_input.bind(on_text_validate=self.on_peak_input, on_focus=self.on_peak_focus)
         pt_box.add_widget(self.peak_input)
         entries_layout.add_widget(pt_box)
 
         # Tell mask (bitmask input)
-        ts_box = BoxLayout(orientation='vertical')
-        l4 = Label(text='Tell mask', size_hint_y=0.4)
+        ts_box = BoxLayout(orientation='horizontal')
+        l4 = Label(text='Tell mask', size_hint_x=1.0)
         autoscale(l4, 0.7)
         ts_box.add_widget(l4)
-        self.tell_input = TextInput(text=str(getattr(self, 'tell_mask', 1)), multiline=False, input_filter='int', size_hint_y=0.6)
-        autoscale(self.tell_input, 0.5)
+        self.tell_input = TextInput(text=str(getattr(self, 'tell_mask', 1)), multiline=False, input_filter='int', size_hint_x=0.9)
+        autoscale(self.tell_input, 0.6)
         self.tell_input.bind(on_text_validate=self.on_tell_input, on_focus=self.on_tell_focus)
         ts_box.add_widget(self.tell_input)
         entries_layout.add_widget(ts_box)
@@ -220,15 +223,24 @@ class ClockApp(App):
         layout.add_widget(self.status_label)
 
         # Scrolling text region (40% of screen)
-        self.log_text = TextInput(
-            text='',
-            readonly=True,
-            font_size='12sp',
+        self.log_scroll = ScrollView(
             size_hint_y=0.4,
-            foreground_color=(1, 1, 1, 1),  # White text
-            background_color=(0.2, 0.2, 0.2, 1)  # Dark grey background
+            do_scroll_x=False,
+            do_scroll_y=True,
+            scroll_type=['bars', 'content'],
+            bar_width=10
         )
-        layout.add_widget(self.log_text)
+        with self.log_scroll.canvas.before:
+            Color(0.2, 0.2, 0.2, 1)
+            self.log_rect = Rectangle(size=self.log_scroll.size, pos=self.log_scroll.pos)
+        self.log_scroll.bind(pos=self._update_scroll_rect, size=self._update_scroll_rect)
+
+        self.log_label = Label(text='', font_size='12sp', size_hint_y=None, color=(1, 1, 1, 1), halign='left', valign='top')
+        self.log_label.bind(texture_size=lambda instance, value: setattr(instance, 'height', value[1]))
+        self.log_label.bind(width=lambda instance, value: setattr(instance, 'text_size', (value, None)))
+        
+        self.log_scroll.add_widget(self.log_label)
+        layout.add_widget(self.log_scroll)
 
         # Spacer to push everything to top
         spacer = Label(
@@ -238,6 +250,10 @@ class ClockApp(App):
         layout.add_widget(spacer)
 
         return layout
+
+    def _update_scroll_rect(self, instance, value):
+        self.log_rect.pos = instance.pos
+        self.log_rect.size = instance.size
 
     # --- TIER 1: HIGH-PRIORITY LISTENER ---
     def audio_callback(self, indata, frames, time_info, status):
@@ -271,13 +287,13 @@ class ClockApp(App):
     def _update_log(self, message):
         """Internal method to update the log text (runs on main thread)."""
         # Add to text region with newline
-        if self.log_text.text:
-            self.log_text.text += '\n' + message
+        if self.log_label.text:
+            self.log_label.text += '\n' + message
         else:
-            self.log_text.text = message
+            self.log_label.text = message
         
         # Scroll to bottom (scroll_y=0 is bottom in Kivy)
-        self.log_text.scroll_y = 0
+        self.log_scroll.scroll_y = 0
 
     def exit_app(self, instance):
         """Exit the application."""
