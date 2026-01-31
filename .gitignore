@@ -2,6 +2,8 @@
 *.xlsx
 # Virtual environment (local)
 venv/
+.venv/
+laptop-venv/
 
 # Bytecode caches
 __pycache__/
