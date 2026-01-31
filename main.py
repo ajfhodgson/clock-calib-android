@@ -115,6 +115,9 @@ def save_histogram_worker(app, data_chunk, timestamp):
 
 class ClockApp(App):
     def build(self):
+        if platform != 'android':
+            Window.size = (250, 750)
+
         # Configuration
         # defaults
         self.target_bph = 0
