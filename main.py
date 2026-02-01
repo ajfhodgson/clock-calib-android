@@ -59,7 +59,7 @@ def write_csv(app, filename_root, timestamp, headers, columns):
     Generic function to write columns of data to a CSV file.
     columns: list of numpy arrays (must be same length)
     """
-    filename = f"{filename_root}_{timestamp}.csv"
+    filename = f"{timestamp}_{filename_root}.csv"
     try:
         base_dir = get_save_directory()
         filepath = os.path.join(base_dir, filename)
@@ -93,7 +93,7 @@ class ClockApp(App):
         self.sample_rate = 44100
         self.window_duration = 4.0 
         self.samples_per_window = int(self.sample_rate * self.window_duration)
-        self.tell_mask = 31         # Controls which tell() messages are emitted; bitmask flags (default: just bit 0 = 1)
+        self.tell_mask = 1 + 2 + 8 + 16   # Controls which tell() messages are emitted; bitmask flags (default: just bit 0 = 1)
         
         # State Management
         self.is_running = False
@@ -270,7 +270,7 @@ class ClockApp(App):
             pass
 
         if platform != 'android':
-            print(message)
+            print(str(mask_bit) + ': ' + message)
         
         # Schedule the UI update on the main thread
         Clock.schedule_once(lambda dt: self._update_log( str(mask_bit) + ': ' + message ), 0)
@@ -315,8 +315,8 @@ class ClockApp(App):
         self.samples_per_window = int(self.sample_rate * self.window_duration)
         self.tell(f"[UI] Window duration set to {self.window_duration}s")
         if self.is_running:
-            Clock.unschedule(self.process_buffer)
-            Clock.schedule_interval(self.process_buffer, self.window_duration)
+            Clock.unschedule(self.process_chunk)
+            Clock.schedule_interval(self.process_chunk, self.window_duration)
             self.tell("[UI] Rescheduled buffer processing to new window duration")
 
     def on_window_input(self, instance):
@@ -378,7 +378,7 @@ class ClockApp(App):
             self.mic.start(callback=self.audio_callback)
             self.tell("[Android] AndroidMic started")
             
-            Clock.schedule_interval(self.process_buffer, self.window_duration)
+            Clock.schedule_interval(self.process_chunk, self.window_duration)
             self.tell("[Main] Buffer processing scheduled")
         except Exception as e:
             self.tell(f"CRITICAL ERROR: {e}")
@@ -435,7 +435,7 @@ class ClockApp(App):
                 self.tell("[SoundDevice] Stream started")
 
             # Schedule the Tier 2 Analysis/Export every 4 seconds
-            Clock.schedule_interval(self.process_buffer, self.window_duration)
+            Clock.schedule_interval(self.process_chunk, self.window_duration)
             self.tell("[Main] Buffer processing scheduled")
             
         except Exception as e:
@@ -453,27 +453,29 @@ class ClockApp(App):
             self.mic.stop()
             self.mic = None
         
-        Clock.unschedule(self.process_buffer)
+        Clock.unschedule(self.process_chunk)
         self.start_btn.disabled = False
         self.stop_btn.disabled = True
         # Re-enable inputs when stopped
         self.set_inputs_enabled(True)
         self.status_label.text = "Stopped. Check project folder for CSVs."
 
-    def process_buffer(self, dt):
+    def process_chunk(self, dt):
         """Swing-buffer handler: Kivy timer is the master clock. Drain, process, and analyze whatever's in the buffer."""
         # SWAP BUFFERS FIRST: Tier 1 immediately switches to the fresh buffer
         self.active_buffer, self.inactive_buffer = self.inactive_buffer, self.active_buffer
         max_val = max(self.inactive_buffer) if self.inactive_buffer else 0
         num_samples = len(self.inactive_buffer)
-        self.tell(f"[Tier 2] Chunk: {num_samples} samples at {len(self.inactive_buffer)/self.window_duration} Hz, (max: {max_val:.4f})", 3)
-        
-        # Take all accumulated data from the (now-frozen) inactive buffer
-        audio_chunk_amp = np.array(self.inactive_buffer)
-        self.inactive_buffer.clear()
+        calc_sample_rate = num_samples/self.window_duration # hopefully 44100 Hz
+        sample_rate_error_pc = (calc_sample_rate / self.sample_rate -1)*100 # self.sample_rate is nominal sample clock 
         file_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") # wall clock time
+        self.tell(f"[PC]            {file_timestamp} - {self.ms_since_start:.3f} onwards", 3)
+        self.tell(f"[PC] Samples: {num_samples} in {self.window_duration} s -> {calc_sample_rate} Hz, ({sample_rate_error_pc:.3f} %)", 4)
+        
+        audio_chunk_amp = np.array(self.inactive_buffer) # pos/neg waveform samples
+        self.inactive_buffer.clear()
         if num_samples > 0:
-            # calculate the ms timestamps for each samle (since Start was pressed)
+            # calculate the ms timestamps for each sample (since Start was pressed)
             audio_chunk_ms = self.ms_since_start + np.arange(len(audio_chunk_amp)) * (1000.0 / self.sample_rate)
 
             # find peaks - a) what amplitude is exceeded by only peak_thresh_pc % of samples?
@@ -488,57 +490,77 @@ class ClockApp(App):
                 if cumulative_percentage >= (100.0 - self.peak_thresh_pc):
                     peak_threshold = bin_max
                     break # found our threshold
-            self.tell(f"[Tier 2] Chunk: {self.peak_thresh_pc}% of samples exceeded {peak_threshold:.4f}", 4)
+            self.tell(f"[PC] Peak level threshold: {peak_threshold:.4f} isolated the largest {self.peak_thresh_pc}% of samples", 4)
 
-            mask = audio_chunk_abs >= peak_threshold  # identify peaks
-            audio_peaks = audio_chunk_abs[mask] # condensed array of just the peaks
-            audio_peaks_ms = audio_chunk_ms[mask] # and the associated times
-            audio_peaks_dt = np.diff(audio_peaks_ms, prepend=audio_peaks_ms[0]) 
+            peak_mask = audio_chunk_abs >= peak_threshold  # identify peaks in array of booleans
+            audio_peaks = audio_chunk_abs[peak_mask] # condensed array of just the peaks
+            audio_peaks_ms = audio_chunk_ms[peak_mask] # and the associated times
+            audio_peaks_dt = np.diff(audio_peaks_ms, prepend=audio_peaks_ms[0]) #&&ToDo use last chunk's last peak!
 
-            audio_peaks_padded = np.where(mask, audio_chunk_abs, 0.0) # full lenth array of just peaks
+            audio_peaks_padded = np.where(peak_mask, audio_chunk_abs, 0.0) # full lenth array of just peaks, 0.0 elsewhere
             audio_peaks_padded_dt = np.zeros_like(audio_chunk_ms) # and the associated dt since last peak
             if len(audio_peaks_ms) > 0:
-                audio_peaks_padded_dt[mask] = audio_peaks_dt
+                audio_peaks_padded_dt[peak_mask] = audio_peaks_dt
             
-           
             audio_average = np.mean(audio_chunk_abs) if len(audio_chunk_abs) > 0 else 0.0
             peaks_average = np.mean(audio_peaks) if len(audio_peaks) > 0 else 0.0
+            self.tell(f"[PC] Peaks:  {len(audio_peaks)} above {peak_threshold:.4f}, Max Peak: {max_val:.4f}, Avg Peak: {peaks_average:.4f}, Audio Avg: {audio_average:.4f}, SNR: {peaks_average/audio_average:.1f}", 4)
 
-            self.tell(f"[Tier 2] Peaks: {len(audio_peaks)}, Max: {max_val:.4f}, Avg Peak: {peaks_average:.4f}, Audio Avg: {audio_average:.4f}", 4)
+            # now, identify pulses (isolated leading edge of groups of peaks)
+            # this assumes that the 'ringing' after the pulse's leading edge is short wrt time between pulses
+            max_peak_dt = np.max(audio_peaks_dt) if len(audio_peaks_dt) > 0 else 0. # to normalise expected gaps between pulses
+            pulse_mask = audio_peaks_padded_dt >= (0.5 * max_peak_dt) # will catch some non-ticktock pulses, but reject ringing
+            audio_pulses = audio_peaks_padded[pulse_mask] # just the impulses - short array
+            audio_pulses_ms = audio_chunk_ms[pulse_mask] # their absolute times
+            audio_pulses_dt = np.diff(audio_pulses_ms, prepend=audio_pulses_ms[0]) # calculate delats between pulses
+
+            audio_pulses_padded = np.where(pulse_mask, audio_chunk_abs, 0.0) # full lenth array of just pulses
+            audio_pulses_padded_dt = np.zeros_like(audio_chunk_ms) # and calculate the associated dt since last peak
+            if len(audio_pulses_ms) > 0:
+                audio_pulses_padded_dt[pulse_mask] = audio_pulses_dt # picks out the values for the pulses, leaving 0.0 elsewhere
+            max_pulse_dt = np.max(audio_pulses_dt)
+            avg_pulse_dt = np.average(audio_pulses_dt)
+
+            self.tell(f"[PC] Pulses: {len(audio_pulses)} with dt over {(0.5 * max_peak_dt):.4f}ms, max_peak_dt: {max_peak_dt:.4f}ms, max_pulse_dt: {max_pulse_dt:.4f}ms, avg_pulse_dt: {avg_pulse_dt:.4f}ms", 3)
             
             # Thread 1: Save raw audio CSV in Tier 2 Worker Thread (Daemon=True so they die if app closes)
-            # columns: [Time_ms, Amplitude]
             threading.Thread(
-                target=write_csv, 
-                args=(self, "amps", file_timestamp, 
-                      ["Time_ms", "Amplitude", "AbsAmp", "Peaks", "Peaks_DT"], 
+                target=write_csv, args=(self, "amps", file_timestamp, 
+                      ["Time_ms", "Amplitude", "AbsAmp", "Peaks", "Peaks_dt", "Pulses", "Pulses_dt"], 
                       [audio_chunk_ms, audio_chunk_amp, audio_chunk_abs, 
-                       audio_peaks_padded, audio_peaks_padded_dt]
-                    ), 
-                daemon=True
+                       audio_peaks_padded, audio_peaks_padded_dt,
+                       audio_pulses_padded, audio_pulses_padded_dt
+                       ]
+                    ), daemon=True
             ).start()
             
             # Thread 2: Save just the condensed peaks CSV in Tier 2 Worker Thread (Daemon=True so they die if app closes)
-            # columns: [Time_ms, Amplitude]
             threading.Thread(
-                target=write_csv, 
-                args=(self, "peaks", file_timestamp, 
-                      ["Time_ms", "Peak", "Peak_DT"], 
+                target=write_csv, args=(self, "peaks", file_timestamp, 
+                      ["Time_ms", "Peak", "Peak_dt"], 
                       [audio_peaks_ms, audio_peaks, audio_peaks_dt]
-                    ), 
-                daemon=True
+                    ), daemon=True
             ).start()
             
-            # Thread 3: Compute and save histogram in Tier 2 Worker Thread (Daemon=True so they die if app closes)
+            # Thread 2: Save just the identified pulses CSV in Tier 2 Worker Thread (Daemon=True so they die if app closes)
+            threading.Thread(
+                target=write_csv, args=(self, "pulses", file_timestamp, 
+                      ["Time_ms", "Pulse", "Pulse_dt"], 
+                      [audio_pulses_ms, audio_pulses, audio_pulses_dt]
+                    ), daemon=True
+            ).start()
+            
+            # Thread 4: Compute and save histogram in Tier 2 Worker Thread (Daemon=True so they die if app closes)
             # Prepare histogram data arrays
             bin_indices = np.arange(len(counts))
             bin_maxes = bin_edges[1:]
             percentages = (counts / num_samples * 100)
             
             threading.Thread(
-                target=write_csv, 
-                args=(self, "bins", file_timestamp, ["Bin", "Max_Value", "Count", "Percentage"], [bin_indices, bin_maxes, counts, percentages]), 
-                daemon=True
+                target=write_csv, args=(self, "bins", file_timestamp, 
+                      ["Bin", "Max_Value", "Count", "Percentage"], 
+                      [bin_indices, bin_maxes, counts, percentages]
+                      ), daemon=True
             ).start()
             
             self.status_label.text = f"Recording... Last CSV: {file_timestamp}"
