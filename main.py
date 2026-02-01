@@ -14,6 +14,14 @@ import csv
 import os
 from datetime import datetime
 
+# Mask bits for tell() messages:
+# Bit 0 (1): Startup and status/error messages
+# Bit 1 (2): 
+# Bit 2 (4): File writing messages
+# Bit 3 (8): Chunk Analysis summary
+# Bit 4 (16): Chunk Analysis detail 
+# 
+
 #&&ToDo - avoid the crash after first run/request for microphone permission on Android
 #&&ToDo - ensure there is a timestamp (ms since pressing Start) with the amplitude data in CSV
 #&&ToDO - Generate an array of peaks with their timestamps for later analysis
@@ -44,71 +52,32 @@ def get_save_directory():
     os.makedirs(base_dir, exist_ok=True)
     return base_dir
 
-def verify_and_report_file(app, filepath, num_samples=None):
-    """Verify file exists, get size, and report via app.tell()."""
-    if os.path.exists(filepath):
-        file_size = os.path.getsize(filepath)
-        if file_size > 0:
-            if num_samples is not None:
-                app.tell(f"[Tier 2] Successfully saved {num_samples} samples to {filepath} ({file_size} bytes)",2)
-            else:
-                app.tell(f"[Tier 2] Successfully saved to {filepath} ({file_size} bytes)",2)
-        else:
-            app.tell(f"[Tier 2] ERROR: File created but empty - {filepath} (0 bytes)",2)
-    else:
-        app.tell(f"[Tier 2] ERROR: File does not exist - {filepath}",2)
-
 # --- TIER 2: ANALYSIS & I/O WORKER ---
-def save_csv_worker(app, audio_chunk_amp, audio_chunk_ms, timestamp):
-    """Writes the ms-timestamped chunk to a CSV file in a background thread."""
-    filename = f"amps_{timestamp}.csv"
+def write_csv(app, filename_root, timestamp, headers, columns):
+    """
+    ***This runs in its own thread!***
+    Generic function to write columns of data to a CSV file.
+    columns: list of numpy arrays (must be same length)
+    """
+    filename = f"{filename_root}_{timestamp}.csv"
     try:
         base_dir = get_save_directory()
         filepath = os.path.join(base_dir, filename)
 
-        # Write CSV with time and amplitude columns
         with open(filepath, 'w', newline='') as f:
             writer = csv.writer(f)
-            # Write header with time (ms since start button pressed) then amplitude
-            writer.writerow(["Time_ms", "Amplitude"])
-            rows = []
-            for i, val in enumerate(audio_chunk_amp):
-                rows.append([audio_chunk_ms[i], val])
-            writer.writerows(rows)
-            # Update global counter (approximate / dead-reckoned)
+            writer.writerow(headers)
+            writer.writerows(zip(*columns))
 
-        # Verify and report file
-        verify_and_report_file(app, filepath, num_samples=len(audio_chunk_amp))
+        # verify file has been written and where 
+        if os.path.exists(filepath):
+            file_size = os.path.getsize(filepath)
+            app.tell(f"[Tier 2] {filename} written ({file_size} bytes)",2)
+        else:
+            app.tell(f"[Tier 2] ERROR: File not created - {filepath}",2)
+
     except Exception as e:
-        app.tell(f"[Tier 2] I/O Error: {e}")
-
-def save_histogram_worker(app, audio_chunk_amp, timestamp):
-    """Computes and writes histogram binning to a CSV file in a background thread."""
-    filename = f"bins_{timestamp}.csv"
-    try:
-        base_dir = get_save_directory()
-        filepath = os.path.join(base_dir, filename)
-
-        # Take absolute values
-        data_array = np.abs(audio_chunk_amp)
-        max_val = np.max(data_array) if len(data_array) > 0 else 1.0
-        total_samples = len(data_array)
-        
-        # Create 100 bins from 0 to max_val
-        counts, bin_edges = np.histogram(data_array, bins=100, range=(0, max_val))
-        
-        # Write histogram to CSV
-        with open(filepath, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(["Bin", "Max_Value", "Count", "Percentage"])
-            for bin_num, (bin_max, count) in enumerate(zip(bin_edges[1:], counts)):
-                percentage = (count / total_samples * 100) if total_samples > 0 else 0.0
-                writer.writerow([bin_num, bin_max, int(count), f"{percentage:.2f}"])
-
-        # Verify and report file
-        verify_and_report_file(app, filepath)
-    except Exception as e:
-        app.tell(f"[Tier 2] Histogram Error: {e}")
+        app.tell(f"[Tier 2] I/O Error ({filename_root}): {e}")
 
 #############################################-----------------------------------------------
 
@@ -119,12 +88,12 @@ class ClockApp(App):
 
         # Configuration
         # defaults
-        self.target_bph = 0
+        self.target_bph = 8860 # sriaght-sided mantel clock
         self.peak_thresh_pc = 0.1
         self.sample_rate = 44100
         self.window_duration = 4.0 
         self.samples_per_window = int(self.sample_rate * self.window_duration)
-        self.tell_mask = 7         # Controls which tell() messages are emitted; bitmask flags (default: just bit 0 = 1)
+        self.tell_mask = 31         # Controls which tell() messages are emitted; bitmask flags (default: just bit 0 = 1)
         
         # State Management
         self.is_running = False
@@ -255,18 +224,21 @@ class ClockApp(App):
         self.tell(f"[Init] Screen Size: {Window.size}")
 
         # Attempt to delete old CSVs on startup
+        deleted = 0
+        failed = 0
         try:
             save_dir = get_save_directory()
-            self.tell(f"[Init] Logs written to: {save_dir}", 1)
+            self.tell(f"[Init] CSVs folder: {save_dir}", 0)
             for filename in os.listdir(save_dir):
                 if filename.lower().endswith(".csv"):
                     try:
                         os.remove(os.path.join(save_dir, filename))
-                        self.tell(f"[Init] Deleted old file: {filename}", 1)
+                        deleted += 1
                     except Exception as e:
-                        self.tell(f"[Init] Could not delete {filename}: {e}", 1)
+                        failed += 1
         except Exception as e:
             self.tell(f"[Init] Error accessing save directory: {e}")
+        self.tell(f"[Init] {deleted} CSVs deleted, {failed} failed to be deleted", 0)
 
         return layout
 
@@ -379,7 +351,7 @@ class ClockApp(App):
             self.tell_input.text = str(self.tell_mask)
             return
         self.tell_mask = val
-        self.tell(f"[UI] Tell mask set to {self.tell_mask}", 1)
+        self.tell(f"[UI] Tell mask set to {self.tell_mask}")
 
     def on_tell_focus(self, instance, value):
         if not value:
@@ -397,6 +369,30 @@ class ClockApp(App):
             widget.disabled = not enabled
             widget.background_color = bg_enabled if enabled else bg_disabled
             widget.foreground_color = fg_enabled if enabled else fg_disabled
+
+    def start_android_audio(self):
+        try:
+            from android_audio import AndroidMic
+            self.mic = AndroidMic(sample_rate=self.sample_rate)
+            self.tell("[Android] AndroidMic initialized, starting callback loop...")
+            self.mic.start(callback=self.audio_callback)
+            self.tell("[Android] AndroidMic started")
+            
+            Clock.schedule_interval(self.process_buffer, self.window_duration)
+            self.tell("[Main] Buffer processing scheduled")
+        except Exception as e:
+            self.tell(f"CRITICAL ERROR: {e}")
+            self.status_label.text = f"Mic Error: {e}"
+            self.stop_session(None)
+
+    def permission_callback(self, permissions, results):
+        if all(results):
+            self.tell("[Android] Permissions granted.")
+            self.start_android_audio()
+        else:
+            self.tell("[Android] Permissions denied.")
+            self.status_label.text = "Permissions Denied"
+            self.stop_session(None)
 
     def start_session(self, instance):
         self.tell("Start button clicked...")
@@ -417,17 +413,15 @@ class ClockApp(App):
         try:
             if platform == 'android':
                 # Request audio and storage permissions on Android
-                from android.permissions import request_permissions, Permission
-                request_permissions([Permission.RECORD_AUDIO, Permission.WRITE_EXTERNAL_STORAGE])
-                self.tell("[Android] Audio and storage permissions requested")
+                from android.permissions import request_permissions, check_permission, Permission
+                perms = [Permission.RECORD_AUDIO, Permission.WRITE_EXTERNAL_STORAGE]
                 
-                # Use the custom Android class we built
-                from android_audio import AndroidMic
-                self.mic = AndroidMic(sample_rate=self.sample_rate)
-                self.tell("[Android] AndroidMic initialized, starting callback loop...")
-                # Pass the callback to the Android version
-                self.mic.start(callback=self.audio_callback)
-                self.tell("[Android] AndroidMic started")
+                if all(check_permission(p) for p in perms):
+                    self.start_android_audio()
+                else:
+                    self.tell("[Android] Requesting permissions...")
+                    request_permissions(perms, self.permission_callback)
+                return
             else:
                 # Use SoundDevice for Windows/Mac
                 import sounddevice as sd
@@ -472,7 +466,7 @@ class ClockApp(App):
         self.active_buffer, self.inactive_buffer = self.inactive_buffer, self.active_buffer
         max_val = max(self.inactive_buffer) if self.inactive_buffer else 0
         num_samples = len(self.inactive_buffer)
-        self.tell(f"[Tier 2] Process chunk: {num_samples} samples at {len(self.inactive_buffer)/self.window_duration} Hz, (max: {max_val:.4f})", 1)
+        self.tell(f"[Tier 2] Chunk: {num_samples} samples at {len(self.inactive_buffer)/self.window_duration} Hz, (max: {max_val:.4f})", 3)
         
         # Take all accumulated data from the (now-frozen) inactive buffer
         audio_chunk_amp = np.array(self.inactive_buffer)
@@ -494,24 +488,56 @@ class ClockApp(App):
                 if cumulative_percentage >= (100.0 - self.peak_thresh_pc):
                     peak_threshold = bin_max
                     break # found our threshold
-            self.tell(f"[Tier 2] Process chunk: {self.peak_thresh_pc}% of samples exceeded {peak_threshold:.4f}", 1)
+            self.tell(f"[Tier 2] Chunk: {self.peak_thresh_pc}% of samples exceeded {peak_threshold:.4f}", 4)
 
-            mask = audio_chunk_abs >= peak_threshold
-            audio_peaks = audio_chunk_abs[mask]
-            audio_peak_ms = audio_chunk_ms[mask]
-            self.tell(f"[Tier 2] Process chunk: {len(audio_peaks)} samples left in peaks array", 1)
+            mask = audio_chunk_abs >= peak_threshold  # identify peaks
+            audio_peaks = audio_chunk_abs[mask] # condensed array of just the peaks
+            audio_peaks_ms = audio_chunk_ms[mask] # and the associated times
+            audio_peaks_dt = np.diff(audio_peaks_ms, prepend=audio_peaks_ms[0]) 
+
+            audio_peaks_padded = np.where(mask, audio_chunk_abs, 0.0) # full lenth array of just peaks
+            audio_peaks_padded_dt = np.zeros_like(audio_chunk_ms) # and the associated dt since last peak
+            if len(audio_peaks_ms) > 0:
+                audio_peaks_padded_dt[mask] = audio_peaks_dt
+            
+           
+            audio_average = np.mean(audio_chunk_abs) if len(audio_chunk_abs) > 0 else 0.0
+            peaks_average = np.mean(audio_peaks) if len(audio_peaks) > 0 else 0.0
+
+            self.tell(f"[Tier 2] Peaks: {len(audio_peaks)}, Max: {max_val:.4f}, Avg Peak: {peaks_average:.4f}, Audio Avg: {audio_average:.4f}", 4)
             
             # Thread 1: Save raw audio CSV in Tier 2 Worker Thread (Daemon=True so they die if app closes)
+            # columns: [Time_ms, Amplitude]
             threading.Thread(
-                target=save_csv_worker, 
-                args=(self, audio_chunk_amp, audio_chunk_ms, file_timestamp), 
+                target=write_csv, 
+                args=(self, "amps", file_timestamp, 
+                      ["Time_ms", "Amplitude", "AbsAmp", "Peaks", "Peaks_DT"], 
+                      [audio_chunk_ms, audio_chunk_amp, audio_chunk_abs, 
+                       audio_peaks_padded, audio_peaks_padded_dt]
+                    ), 
                 daemon=True
             ).start()
             
-            # Thread 2: Compute and save histogram in Tier 2 Worker Thread (Daemon=True so they die if app closes)
+            # Thread 2: Save just the condensed peaks CSV in Tier 2 Worker Thread (Daemon=True so they die if app closes)
+            # columns: [Time_ms, Amplitude]
             threading.Thread(
-                target=save_histogram_worker, 
-                args=(self, audio_chunk_amp, file_timestamp), 
+                target=write_csv, 
+                args=(self, "peaks", file_timestamp, 
+                      ["Time_ms", "Peak", "Peak_DT"], 
+                      [audio_peaks_ms, audio_peaks, audio_peaks_dt]
+                    ), 
+                daemon=True
+            ).start()
+            
+            # Thread 3: Compute and save histogram in Tier 2 Worker Thread (Daemon=True so they die if app closes)
+            # Prepare histogram data arrays
+            bin_indices = np.arange(len(counts))
+            bin_maxes = bin_edges[1:]
+            percentages = (counts / num_samples * 100)
+            
+            threading.Thread(
+                target=write_csv, 
+                args=(self, "bins", file_timestamp, ["Bin", "Max_Value", "Count", "Percentage"], [bin_indices, bin_maxes, counts, percentages]), 
                 daemon=True
             ).start()
             
