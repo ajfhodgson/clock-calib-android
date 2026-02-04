@@ -14,6 +14,9 @@ import csv
 import os
 from datetime import datetime
 
+import claude_filter # clock tick detector written by Claude AI
+
+
 # Mask bits for tell() messages:
 # Bit 0 (1): Startup and status/error messages
 # Bit 1 (2): 
@@ -106,6 +109,9 @@ class ClockApp(App):
         self.active_buffer = self.buffer_a  # Tier 1 appends to this
         self.inactive_buffer = self.buffer_b  # Tier 2 processes this
         
+        # Initialize Clause's clock tick detector
+        self.detector = claude_filter.ClockTickDetector(sr=44100, min_tick_interval=0.3)
+
         # UI Setup
         layout = BoxLayout(orientation='vertical', padding=30, spacing=20)
         
@@ -434,6 +440,8 @@ class ClockApp(App):
                 self.stream.start()
                 self.tell("[SoundDevice] Stream started")
 
+            self.detector.reset()  # Reset Claude's detector state
+
             # Schedule the Tier 2 Analysis/Export every 4 seconds
             Clock.schedule_interval(self.process_chunk, self.window_duration)
             self.tell("[Main] Buffer processing scheduled")
@@ -474,6 +482,13 @@ class ClockApp(App):
         
         audio_chunk_amp = np.array(self.inactive_buffer) # pos/neg waveform samples
         self.inactive_buffer.clear()
+
+        # do it the Clause AI way: All in one!
+
+        tick_times, res = self.detector.process_chunk(audio_chunk_amp)
+
+
+
         if num_samples > 0:
             # calculate the ms timestamps for each sample (since Start was pressed)
             audio_chunk_ms = self.ms_since_start + np.arange(len(audio_chunk_amp)) * (1000.0 / self.sample_rate)
@@ -563,10 +578,28 @@ class ClockApp(App):
                       ), daemon=True
             ).start()
             
+            # Thread 2: Save the results of Claude's Clock Tick Detector to CSV
+
+#            'time_axis': time_axis  # Time in seconds for each sample in chunk
+#            'onset_strength': onset_strength,
+#            'fast_env': fast_env,
+#            'slow_env': slow_env,
+#            'filtered': filtered,
+#            'threshold': threshold,
+
+            threading.Thread(
+                target=write_csv, args=(self, "claude", file_timestamp, 
+                      ["Time_ms", "Time_s", "audio", "filtered", "onset_strength"], 
+                      [audio_pulses_ms, res['time_axis'], audio_chunk_amp, res['filtered'], res['onset_strength']]
+                    ), daemon=True
+            ).start()
+            
             self.status_label.text = f"Recording... Last CSV: {file_timestamp}"
 
             # Update the running timestamp counter
             self.ms_since_start += (len(audio_chunk_amp) / self.sample_rate) * 1000.0
+
+
 
 if __name__ == '__main__':
     ClockApp().run()
