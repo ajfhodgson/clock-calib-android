@@ -4,7 +4,7 @@ import os
 
 # Windows plotting functions, using matplotlib
 
-def plot_chunk_results(chunk_num, total_chunks, edge_times, debug_info, clock_name='Clock', mad_factor=3):
+def plot_chunk_results(chunk_num, total_chunks, edge_times, debug_info, clock_name='Clock'):
     """Plot the results for a single chunk."""
     time_axis = debug_info['time_axis']
     
@@ -56,7 +56,7 @@ def plot_chunk_results(chunk_num, total_chunks, edge_times, debug_info, clock_na
     plt.show()
 
 
-def plot_intervals_histogram(counts1, bins1, counts2, bins2, counts3=None, bins3=None, counts4=None, bins4=None, clock_name='Clock', mad_factor=3):
+def plot_intervals_histogram(counts1, bins1, counts2, bins2, counts3=None, bins3=None, counts4=None, bins4=None, clock_name='Clock'):
     """Plot histograms for up to 4 sets of counts and bins in 2x2 subplots."""
     fig, axs = plt.subplots(2, 2, figsize=(14, 10))
     axs = axs.flatten()
@@ -90,7 +90,7 @@ def plot_intervals_histogram(counts1, bins1, counts2, bins2, counts3=None, bins3
 
         bin_span_ms = bin_widths[0] * 1000 if len(bin_widths) > 0 else 0
         total_ticks = np.sum(counts)
-        ax.set_title(f'{clock_name} - {title_part}\nBins: {len(bins)-1}, Bin Span: {bin_span_ms:.2f} ms, Total: {total_ticks} ticks, mad_factor: {mad_factor}', fontsize=10)
+        ax.set_title(f'{clock_name} - {title_part}\nBins: {len(bins)-1}, Bin Span: {bin_span_ms:.2f} ms, Total: {total_ticks} ticks', fontsize=10)
         ax.set_xlabel('Seconds')
         ax.set_ylabel('Count')
         ax.legend()
