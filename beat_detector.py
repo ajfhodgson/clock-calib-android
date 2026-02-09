@@ -122,7 +122,7 @@ class ClockBeatDetector:
 
 # ======= end of process_chunk method ===========================================
 
-    def weed_beats_from_edges(self, edge_times, plot_it, clock_name):
+    def weed_edges_in_window(self, edge_times, plot_it, clock_name):
         # called when we have a decent window's-worth of edges, enough to make a useful histogram
         # I expect after 4s, 16s, 64s, 256s, 1024s, 4096s, 16384s (4.5 hours) - will get more accurate as more ticks are added, but takes longer to calculate and plot, and less responsive to changes in tick interval over time.
 
@@ -138,7 +138,7 @@ class ClockBeatDetector:
         indexes_of_biggest_bins = np.argsort(counts1)[-2:]
         idx_low, idx_high = np.sort(indexes_of_biggest_bins)
         crude_beat_period = (bins1[idx_low] + bins1[idx_high + 1]) / 2
-        print(f"Crude beat period estimated from histogram: {crude_beat_period:.3f} seconds (bins {idx_low} and {idx_high}, counts {counts1[idx_low]} and {counts1[idx_high]})")
+#        print(f"Crude beat period estimated from histogram: {crude_beat_period:.3f} seconds (bins {idx_low} and {idx_high}, counts {counts1[idx_low]} and {counts1[idx_high]})")
 
         # weed out false positive beats where the next beat is a more plausible beat that this one
         bad_beats = []
@@ -152,7 +152,7 @@ class ClockBeatDetector:
             if (abs(dt1[i] - crude_beat_period) > abs(dt2[i+1] - crude_beat_period)) : # i is BAD - erase it!
                 bad_beats.append(beats[i]) # keep track of which beats we are erasing, for reporting and debugging
                 dt1[i+1] = dt1[i+1] + dt1[i] # update dt1 of the next beat to skip the erased edge
-                dt2[i+1] = dt2[i+1] + dt1[i] # update dt2 of the next beat to skip the erased edge
+                dt2[i+2] = dt2[i+2] + dt1[i] # update dt2 of the next beat to skip the erased edge
                 beats[i] = dt1[i] = dt2[i] = np.nan # this beat is erased, so its time, dt1 and dt2 are now meaningless
     #            print(f"  => Rejected beat {i} at time {beats[i]:.2f}s as false positive, dt1={dt1[i]:.3f}s is further from crude beat period than dt2={dt2[i+1]:.3f}s")
             else:
@@ -167,47 +167,53 @@ class ClockBeatDetector:
         counts3, bins3 = np.histogram(good_dt1, bins=50) # &&ToDo - should this be fixed or auto? 
         counts4, bins4 = np.histogram(good_dt2, bins=50) # just for visual histogram, not used 
 
-        print(f"After Weeding: {len(bad_beats)} bad beats, {len(good_beats)} good beats")
+        # Refined analysis of beat period and error
+        if len(good_beats) > 5:
+            # Identify the two most populated bins in the filtered histogram
+            top_two_indexes = np.argsort(counts3)[-2:]
+            min_idx = np.min(top_two_indexes) # left-most of the two biggest bins
+            max_idx = np.max(top_two_indexes) # right-most of the two biggest bins
+            
+            # Find contiguous non-zero bins around and between these peaks
+            while min_idx > 0 and counts3[min_idx - 1] > 0:  # Expand left
+                min_idx -= 1
+            while max_idx < len(counts3) - 1 and counts3[max_idx + 1] > 0: # Expand right
+                max_idx += 1
+            
+            # Determine the value range from the bin edges
+            range_min = bins3[min_idx] # in seconds
+            range_max = bins3[max_idx + 1] # in seconds
+            
+            # Select the beat intervals that fall within this range
+            refined_intervals = good_dt1[(good_dt1 >= range_min) & (good_dt1 <= range_max)]
+            
+            if len(refined_intervals) > 0:
+                beat_period = np.mean(refined_intervals)
+                
+                # Separate into 'ticks' (> avg) and 'tocks' (< avg)
+                ticks = refined_intervals[refined_intervals > beat_period]
+                tocks = refined_intervals[refined_intervals < beat_period]
+                
+                tick_interval = np.mean(ticks) if len(ticks) > 0 else beat_period
+                tock_interval = np.mean(tocks) if len(tocks) > 0 else beat_period
+                
+                beat_error_s = abs(tick_interval - tock_interval) / 2
+                beat_error_pc = (beat_error_s / beat_period * 100.0) if beat_period > 0 else 0.0
 
-        if False :
-        # LET'S TRY A SECOND WEEEDING!
-            # find mid-point between the two most-populated bins of dt1
-            indexes_of_biggest_bins = np.argsort(counts3)[-2:]
-            idx_low, idx_high = np.sort(indexes_of_biggest_bins)
-            crude_beat_period = (bins3[idx_low] + bins3[idx_high + 1]) / 2
-            print(f"Crude beat period estimated from histogram: {crude_beat_period:.3f} seconds (bins {idx_low} and {idx_high}, counts {counts3[idx_low]} and {counts3[idx_high]})")
+                str = f"Window: {edge_times[0]:.0f}s to {edge_times[-1]:.0f}s. {len(edge_times)} - {len(bad_beats)} = {len(good_beats)} beats. "
+                str += f"BPH {3600/crude_beat_period:.1f}s -> {(3600/beat_period):.1f}). "
+                str += f"Tick/Tock {tick_interval:.3f}s / {tock_interval:.3f}s -> {beat_error_s:.3f} s ({beat_error_pc:.1f}%)"
+                print(str)
 
-            beats = good_beats # start optimistically assuming all remaining beats are good, will weed out the false positives using the histograms of dt1 and dt2
-            dt1 = good_dt1
-            dt2 = good_dt2
+                title = f"{clock_name}: {edge_times[0]:.0f}s to {edge_times[-1]:.0f}s - Period {crude_beat_period:.3f}s -> {beat_period:.3f}s"
 
-            for i in range(2, len(beats)-2): # we've only got dt2 values after i=2 
-        #        print(f"Checking beat {i} at time {beats[i]:.2f}s: dt1={dt1[i]:.3f}s, dt2={dt2[i+1]:.3f}s, crude_beat_period={crude_beat_period:.3f}s")
-                if (abs(dt1[i] - crude_beat_period) > abs(dt2[i+1] - crude_beat_period)) : # i is BAD - erase it!
-                    bad_beats.append(beats[i]) # keep track of which beats we are erasing, for reporting and debugging
-                    dt1[i+1] = dt1[i+1] + dt1[i] # update dt1 of the next beat to skip the erased edge
-                    dt2[i+1] = dt2[i+1] + dt1[i] # update dt2 of the next beat to skip the erased edge
-                    beats[i] = dt1[i] = dt2[i] = np.nan # this beat is erased, so its time, dt1 and dt2 are now meaningless
-        #            print(f"  => Rejected beat {i} at time {beats[i]:.2f}s as false positive, dt1={dt1[i]:.3f}s is further from crude beat period than dt2={dt2[i+1]:.3f}s")
-                else:
-        #            print(f"  => Accepted beat {i} at time {beats[i]:.2f}s as valid, dt1={dt1[i]:.3f}s is closer to crude beat period than dt2={dt2[i+1]:.3f}s")
-                    pass
-
-            # now calculate histograms for the remaining beats, to report on the distribution of dt1 and dt2 for the 'good' beats, and to plot the histograms with the bad beats removed
-
-            good_beats = beats[~np.isnan(beats)]
-            good_dt1 = np.concatenate(([0], np.diff(good_beats)))
-            good_dt2 = np.concatenate(([0, 0], good_beats[2:] - good_beats[:-2]))    
-            counts3, bins3 = np.histogram(good_dt1, bins=50) # &&ToDo - should this be fixed or auto? 
-            counts4, bins4 = np.histogram(good_dt2, bins=50) # just for visual histogram, not used 
-
-            print(f"After SECOND Weeding: {len(bad_beats)} bad beats, {len(good_beats)} good beats")
-
-        if plot_it :
-            windows_plotting.plot_intervals_histogram(counts1, bins1, counts2, bins2, counts3, bins3, counts4, bins4, clock_name)
+                if plot_it :
+                    windows_plotting.plot_intervals_histogram(counts1, bins1, counts2, bins2, counts3, bins3, counts4, bins4, title)
 
         return good_beats, bad_beats
 
-        # end weed_beats_from_edges() =================================
+        # end weed_edges_in_window() =================================
 
 #==========================  end of class ClockBeatDetector =====================
+if __name__ == "__main__":
+    print("DON'T RUN THIS - RUN THE FILE THAT CALLS THIS!.")

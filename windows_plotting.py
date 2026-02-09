@@ -62,10 +62,10 @@ def plot_intervals_histogram(counts1, bins1, counts2, bins2, counts3=None, bins3
     axs = axs.flatten()
     
     data_sets = [
-        (counts1, bins1, 'skyblue', 'dt1', 'Beat Interval'),
-        (counts2, bins2, 'lightgreen', 'dt2', '2-Beat Interval'),
-        (counts3, bins3, 'salmon', 'dt1', 'Weeded Beat Interval'),
-        (counts4, bins4, 'wheat', 'dt2', 'Weeded 2-Beat Interval')
+        (counts1, bins1, 'skyblue', 'dt1', 'dt1'),
+        (counts2, bins2, 'lightgreen', 'dt2', 'dt2'),
+        (counts3, bins3, 'salmon', 'dt1', 'Weeded dt1'),
+        (counts4, bins4, 'wheat', 'dt2', 'Weeded dt2')
     ]
     
     for i, (counts, bins, color, label, title_part) in enumerate(data_sets):
@@ -91,7 +91,6 @@ def plot_intervals_histogram(counts1, bins1, counts2, bins2, counts3=None, bins3
         bin_span_ms = bin_widths[0] * 1000 if len(bin_widths) > 0 else 0
         total_ticks = np.sum(counts)
         ax.set_title(f'{clock_name} - {title_part}\nBins: {len(bins)-1}, Bin Span: {bin_span_ms:.2f} ms, Total: {total_ticks} ticks', fontsize=10)
-        ax.set_xlabel('Seconds')
         ax.set_ylabel('Count')
         ax.legend()
         ax.grid(True, alpha=0.3)
@@ -100,3 +99,6 @@ def plot_intervals_histogram(counts1, bins1, counts2, bins2, counts3=None, bins3
 
     plt.tight_layout()
     plt.show()
+
+if __name__ == "__main__":
+    print("DON'T RUN THIS - RUN THE FILE THAT CALLS THIS!.")
