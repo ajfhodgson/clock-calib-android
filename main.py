@@ -15,7 +15,9 @@ import os
 from datetime import datetime
 from collections import deque
 
+# my code in other files:
 import beat_detector # clock tick detector (lots of help from Claude AI)
+import kivy_plotting # custom Kivy widget for plotting scrolling graphs of audio and detected beats
 
 
 # Mask bits for tell() messages:
@@ -24,14 +26,12 @@ import beat_detector # clock tick detector (lots of help from Claude AI)
 # Bit 2 (4): File writing messages
 # Bit 3 (8): Chunk Analysis summary
 # Bit 4 (16): Chunk Analysis detail 
+# Bit 5 (32): WindowWeeder summary
 # 
 
-#&&ToDo - avoid the crash after first run/request for microphone permission on Android
+#&&ToDo - avoid the crash on Android after first run/request for microphone permission
 #&&ToDo - ensure there is a timestamp (ms since pressing Start) with the amplitude data in CSV
-#&&ToDO - Generate an array of peaks with their timestamps for later analysis
 #&&ToDo - Add a scrolling plot of the received amplitudes, marking the detected peaks
-#&&ToDo - numpy.Autocorellate to detect frequency of the pulse trains (should also indicate beat error)
-#&&ToDo - Decide whether each peak is a 'tick' or a 'tock' based on timing
 
 
 # --- HELPER FUNCTIONS FOR FILE I/O ---
@@ -86,8 +86,8 @@ def write_csv(app, filename_root, timestamp, headers, columns):
 #############################################-----------------------------------------------
 
 class ClockApp(App):
-    def build(self):
-        if platform != 'android':
+    def build(self): # required by kivy, builds the UI and initializes state
+        if platform == 'win': # make Windows look like the Android Samsung S10
             Window.size = (352, 750)
 
         # Configuration
@@ -107,7 +107,7 @@ class ClockApp(App):
         self.window_time_s = self.chunk_time_s * self.chunks_per_window # 60 seconds - how long the window should be for weeding false positives. Shorter is more responsive to changes in tick interval, but less data for histogram analysis. Longer is less responsive to changes in tick interval, but more data for histogram analysis.
         self.samples_per_chunk = int(self.sample_rate * self.chunk_time_s)
 
-        # State Management
+        # State
         self.is_running = False
         self.stream = None
         self.ms_since_start = 0.0  # running ms counter (dead-reckoning since Start pressed)
@@ -131,7 +131,7 @@ class ClockApp(App):
 
         if True :    # Initialise UI 
 
-            layout = BoxLayout(orientation='vertical', padding=30, spacing=20)
+            layout = BoxLayout(orientation='vertical', padding=30, spacing=20) # complete screen
             
             # Helper to scale font size based on widget height
             def autoscale(widget, factor=0.5):
@@ -218,9 +218,9 @@ class ClockApp(App):
             )
             layout.add_widget(self.status_label)
 
-            # Scrolling text region (40% of screen)
+            # Scrolling text region (30% of screen)
             self.log_scroll = ScrollView(
-                size_hint_y=0.4,
+                size_hint_y=0.3,
                 do_scroll_x=False,
                 do_scroll_y=True,
                 scroll_type=['bars', 'content'],
@@ -238,12 +238,29 @@ class ClockApp(App):
             self.log_scroll.add_widget(self.log_label)
             layout.add_widget(self.log_scroll)
 
-            # Spacer to push everything to top
-            spacer = Label(
-                size_hint_y=1,
-                text='reserved for future use'
-            )
-            layout.add_widget(spacer)
+            # Bottom section with 3 equal areas
+            bottom_layout = BoxLayout(orientation='vertical', size_hint_y=1, spacing=5)
+            
+#            # Area 1: Stats
+#            self.stats_area = BoxLayout(orientation='vertical')
+#            self.stats_area.add_widget(Label(text='Stats Area'))
+#            bottom_layout.add_widget(self.stats_area)
+            
+            # Area 2: Timegrapher Chart
+            self.timegrapher_chart = BoxLayout(orientation='vertical')
+            with self.timegrapher_chart.canvas.before:
+                Color(0, 0.1, 0, 1)
+                self.tg_rect = Rectangle(size=self.timegrapher_chart.size, pos=self.timegrapher_chart.pos)
+            self.timegrapher_chart.bind(size=lambda instance, value: setattr(self.tg_rect, 'size', value))
+            self.timegrapher_chart.bind(pos=lambda instance, value: setattr(self.tg_rect, 'pos', value))
+            self.timegrapher_chart.add_widget(Label(text='Timegrapher Chart'))
+            bottom_layout.add_widget(self.timegrapher_chart)
+            
+            # Area 3: Audio Chart
+            self.audio_chart = kivy_plotting.ScrollingGraphWidget(x_span_s=10)
+            bottom_layout.add_widget(self.audio_chart)
+
+            layout.add_widget(bottom_layout)
 
             self.tell(f"[Init] Screen Size: {Window.size}")
 
@@ -292,7 +309,7 @@ class ClockApp(App):
         except Exception:
             pass
         mess = datetime.now().strftime("%H:%M:%S.%f")[:-5] + ' ' + str(mask_bit) + ': ' + message
-        if platform != 'android':
+        if platform == 'win':
             print(mess)
         # Schedule the UI update to the scrolling message window on the main thread
         Clock.schedule_once(lambda dt: self._update_log( mess ), 0)
@@ -436,6 +453,8 @@ class ClockApp(App):
         self.stream = None
         self.mic = None
 
+        self.audio_chart.clear_buffers()  # Clear the plot buffers at the start of a new session
+
         try:
             if platform == 'android':
                 # Request audio and storage permissions on Android
@@ -503,9 +522,13 @@ class ClockApp(App):
         self.inactive_buffer.clear()
 
         #===== DO THE BUSINESS ON THE CHUNK ========
-        chunk_edge_times, debug_info = self.detector.process_chunk(audio_chunk_amp)
-#        debug_info = {'time_axis', 'audio_chunk', 'onset_strength', 'threshold', 'fast_env', 'slow_env', 'filtered'}
-        #===== DO THE BUSINESS ON THE CHUNK ========
+        time_series_data, chunk_edge_times = self.detector.process_chunk(audio_chunk_amp)
+#        time_series_data = {'time_axis', 'audio_chunk', 'onset_strength', 'threshold', 'fast_env', 'slow_env', 'filtered'}
+
+        f = self.audio_downsample_factor
+        downsampled_data = {k: v[::f] for k, v in time_series_data.items()} # downsamples ALL members of time_series_data
+        self.audio_chart.add_chunk_to_plot(downsampled_data, chunk_edge_times)
+        #===== END OF DO THE BUSINESS ON THE CHUNK ========
 
         self.edge_times_deque.extend(chunk_edge_times)
 
@@ -514,15 +537,18 @@ class ClockApp(App):
         # downsample the debug arrays by self.audio_downsample_factor
         # append them (filtered, onset_strength and edges) to the deques (length self.audio_chart_time_s) for plotting
 
+
         # if it's time for self.window_time_s:
         #   call weed_edges_in_window(); 
         #   replace charting of found edges with good beats and bad beats (and later, ticks and tocks)
 
+#--------------------- Weeding the Window and Updating the Charts with bad beats, ticks and tocks---------------------
         self.chunk_counter += 1
         if self.chunk_counter % self.chunks_per_window == 0: # time to weed and reset the chunk count
             good_beats, bad_beats = self.detector.weed_edges_in_window(self.edge_times_deque, plot_it=False, clock_name='unknown')
             self.tell(f"[pc] Beats: {len(good_beats)} Good, {len(bad_beats)} Bad ", 3)
 
+#--------------------- End of Weeding the Window and Updating the Charts ---------------------
 
 #        self.audio_chart_time_s = 120.0
 #        self.beats_chart_time_s = 120.0
@@ -588,7 +614,6 @@ class ClockApp(App):
 
         # Update the running timestamp counter
         self.ms_since_start += (len(audio_chunk_amp) / self.sample_rate) * 1000.0
-
 
 
 if __name__ == '__main__':

@@ -108,17 +108,17 @@ class ClockBeatDetector:
         # Update total samples processed to keep track of absolute time across chunks
         self.sample_count_before_this_chunk += len(audio_chunk)
         
-        debug_info = {
+        time_series_data = {
             'time_axis': time_axis,  # Time in seconds for each sample in chunk
             'audio_chunk': audio_chunk,  # Include original audio for plotting
             'onset_strength': onset_strength,
-            'threshold': threshold,
+            'threshold': np.full_like(time_axis, threshold),
             'fast_env': fast_env,
             'slow_env': slow_env,
             'filtered': filtered,
         }
         
-        return chunk_edge_times, debug_info
+        return time_series_data, chunk_edge_times
 
 # ======= end of process_chunk method ===========================================
 
