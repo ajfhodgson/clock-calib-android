@@ -105,14 +105,14 @@ if __name__ == "__main__":
 
     for i, chunk in enumerate(chunks):
 
-        chunk_edge_times, debug_info = detector.process_chunk(chunk)
+        time_series_data, chunk_edge_times = detector.process_chunk(chunk)
         
         append_edge_times_to_csv(chunk_edge_times, all_edge_times) # appends to ticks file (with dt1 and dt2)
         all_edge_times.extend(chunk_edge_times) # add it to the array itself
         
         if False :
             print(f"Chunk {i+1}/{len(chunks)}: "
-                f"{debug_info['time_axis'][0]:.2f}s to {debug_info['time_axis'][-1]:.2f}s - "
+                f"{time_series_data['time_axis'][0]:.2f}s to {time_series_data['time_axis'][-1]:.2f}s - "
                 f"found {len(chunk_edge_times)} ticks, total so far: {len(all_edge_times)}"
                 )
         if False :
@@ -120,7 +120,7 @@ if __name__ == "__main__":
                 print(f"Chunk {i} Edge times: {chunk_edge_times}") 
         
         if plot_each_chunk :
-            windows_plotting.plot_chunk_results(i+1, len(chunks), chunk_edge_times, debug_info, clock_name=clock_name)
+            windows_plotting.plot_chunk_results(i+1, len(chunks), chunk_edge_times, time_series_data, clock_name=clock_name)
 
         # if we've accumulated enough edges/potential beats for a weeding session, 
         new_data = len(all_edge_times) - last_window_start_time

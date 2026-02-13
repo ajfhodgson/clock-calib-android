@@ -4,25 +4,25 @@ import os
 
 # Windows plotting functions, using matplotlib
 
-def plot_chunk_results(chunk_num, total_chunks, edge_times, debug_info, clock_name='Clock'):
+def plot_chunk_results(chunk_num, total_chunks, edge_times, time_series_data, clock_name='Clock'):
     """Plot the results for a single chunk."""
-    time_axis = debug_info['time_axis']
+    time_axis = time_series_data['time_axis']
     
     fig, ax = plt.subplots(figsize=(14, 8))
     
-    ax.plot(time_axis, debug_info['audio_chunk'], color='grey', alpha=0.5, label='Audio', linewidth=0.5) # Plot audio in grey
-    ax.plot(time_axis, debug_info['filtered'], color='blue', alpha=0.6, label='Filtered', linewidth=0.8) # Plot filtered in blue
-    ax.plot(time_axis, debug_info['fast_env'], color='purple', alpha=0.8, label='Fast envelope', linewidth=1)     # Plot fast and slow envelopes in purple
-    ax.plot(time_axis, debug_info['slow_env'], color='purple', alpha=0.5, linestyle='--', label='Slow envelope', linewidth=1)
-    ax.plot(time_axis, debug_info['onset_strength'], color='green', alpha=0.8, label='Onset strength', linewidth=1.5) # Plot onset strength in green
-    ax.axhline(debug_info['threshold'], color='orange', linestyle=':', label='Threshold', linewidth=1) # Plot threshold as horizontal line
+    ax.plot(time_axis, time_series_data['audio_chunk'], color='grey', alpha=0.5, label='Audio', linewidth=0.5) # Plot audio in grey
+    ax.plot(time_axis, time_series_data['filtered'], color='blue', alpha=0.6, label='Filtered', linewidth=0.8) # Plot filtered in blue
+    ax.plot(time_axis, time_series_data['fast_env'], color='purple', alpha=0.8, label='Fast envelope', linewidth=1)     # Plot fast and slow envelopes in purple
+    ax.plot(time_axis, time_series_data['slow_env'], color='purple', alpha=0.5, linestyle='--', label='Slow envelope', linewidth=1)
+    ax.plot(time_axis, time_series_data['onset_strength'], color='green', alpha=0.8, label='Onset strength', linewidth=1.5) # Plot onset strength in green
+    ax.axhline(time_series_data['threshold'], color='orange', linestyle=':', label='Threshold', linewidth=1) # Plot threshold as horizontal line
 
     # Plot detected ticks in red
     if len(edge_times) > 0:
         # Find the y-values for the ticks on the onset strength curve
         tick_indices = np.searchsorted(time_axis, edge_times)
-        tick_indices = np.clip(tick_indices, 0, len(debug_info['onset_strength']) - 1)
-        tick_y_values = debug_info['onset_strength'][tick_indices]
+        tick_indices = np.clip(tick_indices, 0, len(time_series_data['onset_strength']) - 1)
+        tick_y_values = time_series_data['onset_strength'][tick_indices]
         
         ax.scatter(edge_times, tick_y_values, color='red', s=100, zorder=5, marker='o', label=f'Ticks ({len(edge_times)})')
         
