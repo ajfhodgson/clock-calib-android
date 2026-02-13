@@ -30,6 +30,9 @@ clock_name = 'DJD Mantel 2' # 40s
 clock_name = 'Djd mantel'
 
 
+chunk_time_s = 4 # seconds - how long each chunk should be for processing. Shorter is more responsive to changes in tick interval, but more computational overhead and less data for histogram analysis. Longer is less responsive to changes in tick interval, but less computational overhead and more data for histogram analysis.
+window_time_s = 60 # seconds - how long the window should be for weeding false positives. Shorter is more responsive to changes in tick interval, but less data for histogram analysis. Longer is less responsive to changes in tick interval, but more data for histogram analysis.
+
 plot_each_chunk = False
 plot_histograms = True
 
@@ -86,9 +89,9 @@ if __name__ == "__main__":
     print(f"Loaded {len(audio)/sr:.2f} seconds of audio at {sr} Hz")
     
     # Create chunks of 4 seconds
-    chunk_size = 4 * sr  # 4 seconds * 44100 samples/sec
+    chunk_size = chunk_time_s * sr  # seconds * 44100 samples/sec
     chunks = [audio[i:i+chunk_size] for i in range(0, len(audio), chunk_size)]
-    print(f"Split into {len(chunks)} chunks of ~4 seconds each\n")
+    print(f"Split into {len(chunks)} chunks of {chunk_time_s} seconds each\n")
     
     # Create detector and process chunks
     detector = beat_detector.ClockBeatDetector(sr=44100)
