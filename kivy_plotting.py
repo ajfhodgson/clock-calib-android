@@ -4,166 +4,164 @@ from collections import deque
 import numpy as np
 
 '''
-Sets up the Kivy widget for plotting the audio data and detected edges.
-This is a custom widget that contains a Graph and manages the data buffers for plotting the audio, onset strength, and detected edges in real-time as the audio is processed in chunks.
-The main class is ScrollingGraphWidget, which has methods to add new chunk data to the plot and to clear the buffers when starting a new run.
+Sets up the Kivy widget for plotting:
+time series data (arrays at fixed sample rate) and 
+event data (array values are timestamps in seconds)
 
-The timebase/audio/filtered/onset etc data passed to add_chunk_to_plot() is already downsampled (e.g. by 1000)
-And needs appending to deque buffers
-BUT edge times are not downsampled, they are absolute seconds snce start of listening
-At the end of most chunks we just have edge times for this chunk.
-But if the chunk end is a window_weed time, we have good and bad beat times going further back, so it's not a 
-matter of simply appending the new edge times to the buffer, we need to replace the buffer with the most recent good and bad beats (and later, ticks and tocks) for the most recent window of time. So we will need to call a method like update_edge_times(good_beats, bad_beats) that replaces the edge times buffer with the good and bad beats (and later ticks and tocks) from the most recent window. This way the scatter plot will show only the categorised edges (good beats, bad beats, ticks, tocks) rather than all detected edges.
-I'll probably handle this by letting edge times be simply appended to the deque, but having passed data for
-good, bad, ticks, tocks spannning the whole plotted period, wthey will overwrite the edges already plotted
-(though I could remove any edges that coincide with goods, bads, ticks, tocks to avoid any chance of double plotting - but maybe it's interesting to see the original edges that got categorised as good beats, bad beats, ticks, tocks for efficiency)
+This is a custom widget that contains a Graph and manages the data buffers for plotting, so the 
+calling program can just add more data and this widget takes care of holding historical data (in deques), 
+adding new data to the deques, and plotting a window's worth of time series and event data, giving a jumpy scrolling effect
+
+The main class is ScrollingGraphWidget, which has methods to add new chunk data to the plot and to clear the buffers 
+when starting a new run.
+
+The time series data (audio/filtered/onset etc) data passed to add_chunk_to_plot() is already downsampled (e.g. by 1000),
+to the resolution needed to be plotted. In here we just plot what we're given.
+
+Note that the adding new event data has to cope with the new data potentially having overlap in time with the
+existing historical data
 
 '''
 
 class ScrollingGraphWidget(BoxLayout):
     def __init__(self, **kwargs):
+        # can take custom arguments 
+        # x_span_s              for span of x axis in seconds
+        # ts_buffer_len         how big timeseries buffers need to be
+        # ev_buffer_len         how big event buffers need to be
+        # chart_colours         colours to be used for each named trace
+
+        #&&ToDo get rid of these once calling program reliably passes them in, to avoid maintenance headache
+        # time_series_data is {'time_axis', 'audio_chunk', 'onset_strength', 'threshold', 'fast_env', 'slow_env', 'filtered'}
+
+        default_colours = {             # set them all up, in case of need later
+                'audio_chunk':  [0.5, 0.5, 0.5, 0.5],   # grey
+                'filtered':     [0, 0, 1, 0.6],         # Blue
+                'onset_strength':        [1, 1, 1, 0.8],         # White
+                'threshold':    [1, 0, 1, 0.8],         # Magenta
+                'fast_env':     [0.5, 0, 0.5, 0.8],     # Purple
+                'slow_env':     [0.5, 0, 0.5, 0.5],     # Purple faded
+
+                'edges':        [1, 0, 1, 0.8],     # Magenta
+                'ticks':        [0, 1, 0, 0.6],     # Green
+                'noises':       [1, 0, 0, 0.8],     # Red
+        }
+
+        #&&ToDo - put in checks for any zero-length datasets passed in
+        #&&ToDo - bugger - I forgot!
 
         # Extract custom arguments before calling super() to avoid Kivy unknown arg error
         self.x_span_s = kwargs.pop('x_span_s', 60) # seconds to show on x-axis
-        self.ds_buffer_len = kwargs.pop('ds_buffer_len', self.x_span_s * 44100 // 1000) # buffer length for plotting
+        self.ts_buffer_len = kwargs.pop('ts_buffer_len', int(self.x_span_s * 44100 / 1000)) # buffer length for plotting
+        self.ev_buffer_len = kwargs.pop('ev_buffer_len', int(self.x_span_s * 20)) # buffer length for plotting events
+
+        self.colours = kwargs.pop('chart_colours', default_colours) 
         super().__init__(**kwargs)
         self.orientation = 'vertical'
         
-        # Rolling buffer parameters
-
-       
-        # Data buffers - hold x_span_s seconds of downsampled data
-        self.buffer_size = self.ds_buffer_len  
-
-        self.time_buffer = deque(maxlen=self.buffer_size)
-        self.filtered_buffer = deque(maxlen=self.buffer_size)
-        self.onset_buffer = deque(maxlen=self.buffer_size)
-        self.threshold_buffer = deque(maxlen=self.buffer_size)
-#        self.audio_buffer = deque(maxlen=self.buffer_size)
-#        self.fast_env_buffer = deque(maxlen=self.buffer_size)
-#        self.slow_env_buffer = deque(maxlen=self.buffer_size)
-
-        # scatter plot (edges, beats, ticks, tocks) data storage
-        self.edge_times_buffer = deque(maxlen=100)  # Store edge times
-
         # Track absolute time
-        self.current_time = 0.0
-        
-        # Create graph
+        self.latest_time = 0.0
+
+        self.ts_buffers = {} # will contain named buffers, one for each timeseries asked to be plotted
+        self.ev_buffers = {} # will contain named buffers, one for each event series asked to be plotted
+        self.ts_plots = {}    # container for kivy_graphics plots
+        self.ev_plots = {}    # container for kivy_graphics plots
+
+        # Create graph itself on which we draw lines and points (no plots on it yet!)
         self.graph = Graph(
-#-            xlabel='Time (s)', ylabel='Amplitude',
             x_ticks_minor=5, x_ticks_major=10, y_ticks_major=0.001, 
             x_grid=True, y_grid=True, y_grid_label=True, x_grid_label=True, padding=5,
             xmin=0, xmax=self.x_span_s, # initial default this gets rolled on as time goes by
-            ymin=-0.01, ymax=0.01 # initial default - we'll auto-scale this based on data in the current window
+            ymin=-0.01, ymax=0.0001 # initial default - we'll auto-scale this based on data in the current window
         )
-        
-        # Create plots - each line on the chart is considered a "plot" in kivy_garden.graph
-        self.filtered_plot = MeshLinePlot(color=[0, 0, 1, 0.6])     # Blue
-        self.onset_plot = MeshLinePlot(color=[0, 1, 0, 0.8])        # Green
-        self.threshold_plot = MeshLinePlot(color=[1, 1, 0, 0.8])        # Magenta
-#        self.audio_plot = MeshLinePlot(color=[0.5, 0.5, 0.5, 0.5])  # Grey
-#        self.fast_env_plot = MeshLinePlot(color=[0.5, 0, 0.5, 0.8]) # Purple
-#        self.slow_env_plot = MeshLinePlot(color=[0.5, 0, 0.5, 0.5]) # Purple faded
-        
-        # Create scatter plot for edge markers (red dots) - in future will be 
-        # good beats and bad beats, maybe ticks and tocks in different colours
-        # uncategorsised edges will show before the WindowWeeder weeds them and categorises them as good beats or bad beats
-#&&ToDo        self.edge_plot = ScatterPlot(color=[1, 0, 0, 1], pointsize=5)  # Red
-        self.edge_plot = ScatterPlot(color=[1, 0, 0, 1], point_size=3)  # Red
-        
-        # Add plots to graph
-        self.graph.add_plot(self.filtered_plot)
-        self.graph.add_plot(self.onset_plot)
-        self.graph.add_plot(self.threshold_plot)
-#        self.graph.add_plot(self.audio_plot)
-#        self.graph.add_plot(self.fast_env_plot)
-#        self.graph.add_plot(self.slow_env_plot)
-        self.graph.add_plot(self.edge_plot)  # Add edge markers on top
-        
+                
         self.add_widget(self.graph)
         
 #-------------------------------------------------------------------------------------------------------    
-    def add_chunk_to_plot(self, downsampled_data, edge_times):
-        # NOTE - the data passed in here is already downsampled and in numpy arrays
-        # Update current time (end of passed chunk data)
-        self.current_time = downsampled_data['time_axis'][-1]
-        # Append new chunk downsampled data to deque buffers
-        self.time_buffer.extend(downsampled_data['time_axis'])
-        self.filtered_buffer.extend(downsampled_data['filtered'])
-        self.onset_buffer.extend(downsampled_data['onset_strength'])
-        self.threshold_buffer.extend(downsampled_data['threshold'])
-#        self.audio_buffer.extend(downsampled_data['audio_chunk'])
-#        self.fast_env_buffer.extend(downsampled_data['fast_env'])
-#        self.slow_env_buffer.extend(downsampled_data['slow_env'])
-        self.edge_times_buffer.extend(edge_times) # holds more than we need, but gets clipped in plotting
-        
-        # Update the graph
-        if len(self.time_buffer) == 0:
-            return
-        
-        # Update plot data
-#        self.audio_plot.points =    [(t, a) for t, a in zip(self.time_buffer, self.audio_buffer)]
-        self.filtered_plot.points = [(t, f) for t, f in zip(self.time_buffer, self.filtered_buffer)]
-#        self.fast_env_plot.points = [(t, f) for t, f in zip(self.time_buffer, self.fast_env_buffer)]
-#        self.slow_env_plot.points = [(t, s) for t, s in zip(self.time_buffer, self.slow_env_buffer)]
-        self.onset_plot.points = [(t, o) for t, o in zip(self.time_buffer, self.onset_buffer)]
-        self.threshold_plot.points = [(t, o) for t, o in zip(self.time_buffer, self.threshold_buffer)]
-        
-        # Update x-axis to show scrolling window
-        # Show the most recent x_span_s
-        if self.current_time <= self.x_span_s:             # Still filling up the first window
+    def add_chunk_to_plot(self, ts_data_to_append, ev_data_to_append):
+        # NOTE - the timeseries data passed in here is already downsampled and in numpy arrays
+        # NOTE - the event data passed in here may overlap data we've already seen
+        # ts_data+to_append['time_series'] is a special, 'known' timeseries name
+
+        # Update current time (end of the passed chunk data)
+        self.latest_time = ts_data_to_append['time_axis'][-1]
+
+        # Append new chunk of downsampled timeseries data to deque buffers
+        for ts_name in ts_data_to_append:
+            # create the buffers and the plot, if it's new
+            if ts_name not in self.ts_buffers: # not seen this before! Create the buffer and line plot
+                self.ts_buffers[ts_name] = deque(maxlen=self.ts_buffer_len)
+                if ts_name != 'time_axis': # no plot for time itself!
+                    self.ts_plots[ts_name] = MeshLinePlot(color=self.colours[ts_name])
+                    self.graph.add_plot(self.ts_plots[ts_name])
+            # append the new data to the history deque
+            self.ts_buffers[ts_name].extend(ts_data_to_append[ts_name]) # simply append he new data to the correct buffer
+            # add the new points to the plot (x = time, y = ts_name)
+            if ts_name != 'time_axis': # update the actual plot points in the plot
+                self.ts_plots[ts_name].points = [(t, f) for t, f in zip(self.ts_buffers['time_axis'], self.ts_buffers[ts_name])]
+
+        for ev_name in ev_data_to_append:
+            if ev_name not in self.ev_buffers: # not seen this before! Create the buffer and scatter plot
+                self.ev_buffers[ev_name] = deque(maxlen=self.ev_buffer_len)
+                self.ev_plots[ev_name] = ScatterPlot(color=self.colours[ev_name], point_size=3)
+                self.graph.add_plot(self.ev_plots[ev_name])
+            self.ev_buffers[ev_name].extend(ev_data_to_append[ev_name]) # simply append he new data to the correct buffer
+
+            #&&ToDo - take care of the potential overlap - only add new data points later than the existing last event time
+            # for events, we just have times in s. What to use for y-value? Could be 0 for simplicity for now
+            # otherwise we have to look through ts_buffers['time_axis'] for a matching time, then look this time up in
+            # one of the other ts_series, e.g. 'filtered' or 'onset_strength', which would require knowing which in here 
+            # (I'd prefer to be open_minded)
+
+            np_time_buffer = np.array(self.ts_buffers['time_axis']) # outside the loop - need it for all event series
+            #&&ToDo - should pass in the name of the timeseries whose y-value to plot evets at, not guess the name!
+            if 'onset_strength' in self.ts_buffers:
+                np_y_value_buffer = np.array(self.ts_buffers['onset_strength'])
+            else:
+                np_y_value_buffer = np.zeros(len(self.ts_buffers['time_axis']))
+
+            if len(self.ev_buffers[ev_name]) == 0:
+                self.ev_plots[ev_name].points = []
+            else:
+                # For each edge time, find the corresponding y-value on the onset data
+                for ev_time in self.ev_buffers[ev_name]:
+                # Find the closest time in the timescale array
+                    idx = np.searchsorted(np_time_buffer, ev_time)
+                    idx = min(idx, len(np_y_value_buffer) - 1)
+                    # Get x-value from time series and y-value from onset strength at this time
+                    # add to the plotted points
+                    self.ev_plots[ev_name].points.append((ev_time, np_y_value_buffer[idx]))
+
+        # Update x-axis to show scrolling window - show the most recent x_span_s
+        if self.latest_time <= self.x_span_s:   # Still filling up the first window
             self.graph.xmin = 0 
             self.graph.xmax = self.x_span_s
         else: # Scroll the window
-            self.graph.xmin = float(int(self.current_time - self.x_span_s)) # can't cope with an np_float result
+            self.graph.xmin = float(int(self.latest_time - self.x_span_s)) # can't cope with an np_float result
             self.graph.xmax = float(int(self.graph.xmin + self.x_span_s)) # can't cope with an np_float result
             
             # Force a tick update to ensure labels don't disappear
             self.graph.x_ticks_major = self.graph.x_ticks_major
         
-        # Auto-scale y-axis based on visible data
-        if len(self.onset_buffer) > 0:
+        # Auto-scale y-axis based on plotted events
+        if len(np_y_value_buffer) > 0:
             self.graph.ymin = 0
-            self.graph.ymax = float(np.max(self.onset_buffer)) * 1.1 # add 10% headroom
-        
-        # Update edge markers
-        if len(self.edge_times_buffer) == 0:
-            self.edge_plot.points = []
-        else:        
-            # For each edge time, find the corresponding y-value on the onset data
-            np_time_buffer = np.array(self.time_buffer)
-            np_onset_buffer = np.array(self.onset_buffer)
-            for edge_time in self.edge_times_buffer:
-                # Find the closest time in the timescale array
-                idx = np.searchsorted(np_time_buffer, edge_time)
-                idx = min(idx, len(np_onset_buffer) - 1)
-                    
-                # Get y-value from onset strength at this time and add to the plotted points
-                y_value = self.onset_buffer[idx]
-                self.edge_plot.points.append((edge_time, y_value))
-        
+            self.graph.ymax = max(0.0001, float(np.max(np_y_value_buffer)) * 1.1) # add 10% headroom
+      
     
     def clear_buffers(self):
         """Clear all buffers and reset graph. at the start of a new run"""
-        self.time_buffer.clear()
-        self.filtered_buffer.clear()
-        self.onset_buffer.clear()
-        self.threshold_buffer.clear()
-#        self.audio_buffer.clear()
-#        self.fast_env_buffer.clear()
-#        self.slow_env_buffer.clear()
-        self.edge_times_buffer.clear()
+        for ts_name in self.ts_buffers:
+            self.ts_buffers[ts_name].clear()
+        for ts_name in self.ts_plots:
+            self.ts_plots[ts_name].points = []
 
-        self.filtered_plot.points = []
-        self.onset_plot.points = []
-        self.threshold_plot.points = []
-#        self.audio_plot.points = []
-#        self.fast_env_plot.points = []
-#        self.slow_env_plot.points = []
-        self.edge_plot.points = []
-        self.current_time = 0.0
-        
+        for ev_name in self.ev_buffers:
+            self.ev_buffers[ev_name].clear()
+        for ev_name in self.ev_plots:
+            self.ev_plots[ev_name].points = []
+
+        self.latest_time = 0.0
         self.graph.xmin = 0
         self.graph.xmax = self.x_span_s
         

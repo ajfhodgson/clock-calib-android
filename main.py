@@ -98,8 +98,8 @@ class ClockApp(App):
         # set parameters
         self.sample_rate = 44100
         self.chunk_time_s = 4.0 
-        self.chunks_per_window = 6 # likely to want 15 in prod
-        self.audio_chart_time_s = 120.0
+        self.chunks_per_window = 4 # likely to want 15 in prod
+        self.audio_chart_time_s = 60.0
         self.audio_downsample_factor = 1000
         self.beats_chart_time_s = 120.0
         self.peak_thresh_pc = 0.1 # not currently used
@@ -121,8 +121,8 @@ class ClockApp(App):
 
         # deques for accumulating data while running
         self.edge_times_deque = deque(maxlen=4000) # for accumulating edge times for histogram analysis and weeding false positives
-        self.good_beats_deque = deque(maxlen=4000)
-        self.bad_beats_deque = deque(maxlen=4000)
+        self.ticks_deque = deque(maxlen=4000)
+        self.noises_deque = deque(maxlen=4000)
         self.chunk_counter = 0
 
 
@@ -257,7 +257,7 @@ class ClockApp(App):
             bottom_layout.add_widget(self.timegrapher_chart)
             
             # Area 3: Audio Chart
-            self.audio_chart = kivy_plotting.ScrollingGraphWidget(x_span_s=10)
+            self.audio_chart = kivy_plotting.ScrollingGraphWidget(x_span_s=self.audio_chart_time_s)
             bottom_layout.add_widget(self.audio_chart)
 
             layout.add_widget(bottom_layout)
@@ -443,8 +443,8 @@ class ClockApp(App):
         self.inactive_buffer = self.buffer_b
         self.chunk_counter = 0
         self.edge_times_deque.clear()
-        self.good_beats_deque.clear()
-        self.bad_beats_deque.clear()
+        self.ticks_deque.clear()
+        self.noises_deque.clear()
         self.start_btn.disabled = True
         self.stop_btn.disabled = False
         # Disable inputs while running
@@ -515,87 +515,87 @@ class ClockApp(App):
         calc_sample_rate = num_samples/self.chunk_time_s # hopefully 44100 Hz
         sample_rate_error_pc = (calc_sample_rate / self.sample_rate -1)*100 # self.sample_rate is nominal sample clock 
         file_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") # wall clock time
-        self.tell(f"[pc]            {file_timestamp} - {self.ms_since_start:.3f} onwards", 3)
+        self.tell(f"[pc]     {file_timestamp} : chunk starts at {self.ms_since_start:.3f}", 3)
         self.tell(f"[pc] Samples: {num_samples} in {self.chunk_time_s} s -> {calc_sample_rate} Hz, ({sample_rate_error_pc:.3f} %)", 4)
         
-        audio_chunk_amp = np.array(self.inactive_buffer) # pos/neg waveform samples
+        audio_chunk_amp = np.array(self.inactive_buffer) # copy out pos/neg waveform samples
         self.inactive_buffer.clear()
 
-        #===== DO THE BUSINESS ON THE CHUNK ========
+        # PROCESS THE AUDIO CHUNK ====================================
         time_series_data, chunk_edge_times = self.detector.process_chunk(audio_chunk_amp)
-#        time_series_data = {'time_axis', 'audio_chunk', 'onset_strength', 'threshold', 'fast_env', 'slow_env', 'filtered'}
+#        time_series_data is {'time_axis', 'audio_chunk', 'onset_strength', 'threshold', 'fast_env', 'slow_env', 'filtered'}
+
+        self.tell(f"[pc] Chunk {self.chunk_counter}, found {len(chunk_edge_times)} edges, total {len(self.edge_times_deque)}", 4)
+        self.edge_times_deque.extend(chunk_edge_times) # cross-chunk data accumulation for beat weeding
+
+        # WEEDING: ===================================================
+        # Weeding the Window and Updating the Charts with bad beats, ticks and tocks---------------------
+        ticks = noises = [] # calculated for whole 'window' - formerly good_nbeats, noises. May later calculate tocks, distinct from ticks
+        self.chunk_counter += 1
+        if self.chunk_counter % self.chunks_per_window == 0: # time to weed (edge_times_deque is longer than just this chunk)
+            ticks, noises = self.detector.weed_edges_in_window(self.edge_times_deque, plot_it=False, clock_name='unknown')
+            self.tell(f"[pc] Edges are {len(ticks)} Ticks, {len(noises)} Noises", 3)
+
+        # PLOTTING: ==================================================
+        # Delayed until after conditionally calculating good and bad beats
+        # downsample the time series arrays by self.audio_downsample_factor
+        # in the plotter, these are appended to the plotting deques (length self.audio_chart_time_s)
 
         f = self.audio_downsample_factor
         downsampled_data = {k: v[::f] for k, v in time_series_data.items()} # downsamples ALL members of time_series_data
-        self.audio_chart.add_chunk_to_plot(downsampled_data, chunk_edge_times)
-        #===== END OF DO THE BUSINESS ON THE CHUNK ========
 
-        self.edge_times_deque.extend(chunk_edge_times)
+        selected_ds_data = {'time_axis': downsampled_data['time_axis'], 'onset_strength': downsampled_data['onset_strength'], 'threshold': downsampled_data['threshold']}
 
-        self.tell(f"[pc] Chunk {self.chunk_counter}, found {len(chunk_edge_times)} edges, total {len(self.edge_times_deque)}", 4)
+        event_data = {'edges': chunk_edge_times, 'ticks': ticks, 'noises': noises}
 
-        # downsample the debug arrays by self.audio_downsample_factor
-        # append them (filtered, onset_strength and edges) to the deques (length self.audio_chart_time_s) for plotting
-
-
-        # if it's time for self.window_time_s:
-        #   call weed_edges_in_window(); 
-        #   replace charting of found edges with good beats and bad beats (and later, ticks and tocks)
-
-#--------------------- Weeding the Window and Updating the Charts with bad beats, ticks and tocks---------------------
-        self.chunk_counter += 1
-        if self.chunk_counter % self.chunks_per_window == 0: # time to weed and reset the chunk count
-            good_beats, bad_beats = self.detector.weed_edges_in_window(self.edge_times_deque, plot_it=False, clock_name='unknown')
-            self.tell(f"[pc] Beats: {len(good_beats)} Good, {len(bad_beats)} Bad ", 3)
-
-#--------------------- End of Weeding the Window and Updating the Charts ---------------------
-
-#        self.audio_chart_time_s = 120.0
-#        self.beats_chart_time_s = 120.0
-
+        self.audio_chart.add_chunk_to_plot(selected_ds_data, event_data) # plot all of them
+      
+        if False: # 
+            # Thread 1: Save raw audio CSV in Tier 2 Worker Thread (Daemon=True so they die if app closes)
+            threading.Thread(
+                target=write_csv, args=(self, "amps", file_timestamp, 
+                        ["Time_ms", "Amplitude", "AbsAmp", "Peaks", "Peaks_dt", "Pulses", "Pulses_dt"], 
+                        [audio_chunk_ms, audio_chunk_amp, audio_chunk_abs, 
+                        audio_peaks_padded, audio_peaks_padded_dt,
+                        audio_pulses_padded, audio_pulses_padded_dt
+                        ]
+                    ), daemon=True
+            ).start()
         
-        # # Thread 1: Save raw audio CSV in Tier 2 Worker Thread (Daemon=True so they die if app closes)
-        # threading.Thread(
-        #     target=write_csv, args=(self, "amps", file_timestamp, 
-        #             ["Time_ms", "Amplitude", "AbsAmp", "Peaks", "Peaks_dt", "Pulses", "Pulses_dt"], 
-        #             [audio_chunk_ms, audio_chunk_amp, audio_chunk_abs, 
-        #             audio_peaks_padded, audio_peaks_padded_dt,
-        #             audio_pulses_padded, audio_pulses_padded_dt
-        #             ]
-        #         ), daemon=True
-        # ).start()
+        if False: # 
+            # Thread 2: Save just the condensed peaks CSV in Tier 2 Worker Thread (Daemon=True so they die if app closes)
+            threading.Thread(
+                target=write_csv, args=(self, "peaks", file_timestamp, 
+                        ["Time_ms", "Peak", "Peak_dt"], 
+                        [audio_peaks_ms, audio_peaks, audio_peaks_dt]
+                    ), daemon=True
+            ).start()
         
-        # # Thread 2: Save just the condensed peaks CSV in Tier 2 Worker Thread (Daemon=True so they die if app closes)
-        # threading.Thread(
-        #     target=write_csv, args=(self, "peaks", file_timestamp, 
-        #             ["Time_ms", "Peak", "Peak_dt"], 
-        #             [audio_peaks_ms, audio_peaks, audio_peaks_dt]
-        #         ), daemon=True
-        # ).start()
+        if False: # 
+            # Thread 3: Save just the identified pulses CSV in Tier 2 Worker Thread (Daemon=True so they die if app closes)
+            threading.Thread(
+                target=write_csv, args=(self, "pulses", file_timestamp, 
+                        ["Time_ms", "Pulse", "Pulse_dt"], 
+                        [audio_pulses_ms, audio_pulses, audio_pulses_dt]
+                    ), daemon=True
+            ).start()
         
-        # # Thread 3: Save just the identified pulses CSV in Tier 2 Worker Thread (Daemon=True so they die if app closes)
-        # threading.Thread(
-        #     target=write_csv, args=(self, "pulses", file_timestamp, 
-        #             ["Time_ms", "Pulse", "Pulse_dt"], 
-        #             [audio_pulses_ms, audio_pulses, audio_pulses_dt]
-        #         ), daemon=True
-        # ).start()
+        if False: # 
+            # Thread 4: Compute and save histogram in Tier 2 Worker Thread (Daemon=True so they die if app closes)
+            # Prepare histogram data arrays
+            bin_indices = np.arange(len(counts))
+            bin_maxes = bin_edges[1:]
+            percentages = (counts / num_samples * 100)
+            
+            threading.Thread(
+                target=write_csv, args=(self, "bins", file_timestamp, 
+                        ["Bin", "Max_Value", "Count", "Percentage"], 
+                        [bin_indices, bin_maxes, counts, percentages]
+                        ), daemon=True
+            ).start()
         
-        # # Thread 4: Compute and save histogram in Tier 2 Worker Thread (Daemon=True so they die if app closes)
-        # # Prepare histogram data arrays
-        # bin_indices = np.arange(len(counts))
-        # bin_maxes = bin_edges[1:]
-        # percentages = (counts / num_samples * 100)
-        
-        # threading.Thread(
-        #     target=write_csv, args=(self, "bins", file_timestamp, 
-        #             ["Bin", "Max_Value", "Count", "Percentage"], 
-        #             [bin_indices, bin_maxes, counts, percentages]
-        #             ), daemon=True
-        # ).start()
-        
-        # Thread 2: Save the results of Claude's Clock Tick Detector to CSV
-
+        if False: # 
+            # Thread 2: Save the results of Beat Detector to CSV
 #            'time_axis': time_axis  # Time in seconds for each sample in chunk
 #            'onset_strength': onset_strength,
 #            'fast_env': fast_env,
@@ -603,12 +603,12 @@ class ClockApp(App):
 #            'filtered': filtered,
 #            'threshold': threshold,
 
-        # threading.Thread(
-        #     target=write_csv, args=(self, "claude", file_timestamp, 
-        #             ["Time_ms", "Time_s", "audio", "filtered", "onset_strength"], 
-        #             [audio_pulses_ms, res['time_axis'], audio_chunk_amp, res['filtered'], res['onset_strength']]
-        #         ), daemon=True
-        # ).start()
+            threading.Thread(
+                target=write_csv, args=(self, "claude", file_timestamp, 
+                        ["Time_ms", "Time_s", "audio", "filtered", "onset_strength"], 
+                        [audio_pulses_ms, res['time_axis'], audio_chunk_amp, res['filtered'], res['onset_strength']]
+                    ), daemon=True
+            ).start()
         
         self.status_label.text = f"Recording... Last CSV: {file_timestamp}"
 
