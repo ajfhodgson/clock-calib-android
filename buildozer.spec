@@ -6,7 +6,7 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas
 version = 0.1
 
-requirements = python3, kivy==2.3.0, numpy, pyjnius==1.6.0, android, kivy_garden.graph, scipy, matplotlib
+requirements = python3, kivy==2.3.0, numpy, pyjnius==1.6.0, android, kivy_garden.graph
 
 orientation = portrait
 fullscreen = 0

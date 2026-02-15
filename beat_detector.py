@@ -2,8 +2,9 @@ import numpy as np
 from scipy import signal
 from kivy.utils import platform
 
-if platform == 'win':
-    import windows_plotting  # keep matplotlib separate
+# THIS IMPORT IS NEEDED IF CALLING THIS FROM standalone_claude.py
+#if platform == 'win':
+#    import windows_plotting  # keep matplotlib separate
 
 class ClockBeatDetector:
     """Stateful clock tick detector for continuous audio streams."""
