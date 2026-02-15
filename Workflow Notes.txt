@@ -1,4 +1,5 @@
-Assumes In C:\Program Files\platform-tools contains Transfer-apk.ps1:
+Workflow on Predator:
+Assumes C:\Program Files\platform-tools contains Transfer-apk.ps1:
 	$extractPath = "C:\Users\andre\Downloads\"
 	$zipPath = "C:\Users\andre\Downloads\clock-calibrator-apk.zip"
 	$apkFile = "clockcalib-0.1-arm64-v8a_armeabi-v7a-debug.apk"
@@ -6,7 +7,8 @@ Assumes In C:\Program Files\platform-tools contains Transfer-apk.ps1:
 	$adbPath = "C:\Program Files\platform-tools\adb.exe"
 	$packageName = "org.andrew.clock.clockcalib"
 
-In VS Code, Ensure correct Python interpreter (venv): On the desktop: ; On the laptop: laptop-venv (both use python 3.12.x)
+In VS Code, Ensure correct Python interpreter: 
+	On the desktop: (TERMINAL shows (.venv); On the laptop: (laptop-venv) (both use python 3.12.10)
 In VS Code, Open main.py and "Run Python File" - runs app on Windows
 In Vs Code, Stage and Commit changes
 In VS Code, Sync Changes - with Github (this kicks off a Build Android APK action)
@@ -15,7 +17,7 @@ In Github, click on the run, scroll to Artifacts
 In Github, Download clock-calibrator-apk (to C:\Users\andre\Downloads)
 
 Connect Phone via USB
-In Powershell cd C:\Program Files\platform-tools
+In Windows Command Prompt: cd "C:\Program Files\platform-tools"
 Transfer-apk.ps1
 	Extracts clockcalib-0.1-arm64-v8a_armeabi-v7a-debug.apk from C:\Users\andre\Downloads\clock-calibrator-apk.zip
 	Deletes zip file
@@ -23,3 +25,9 @@ Transfer-apk.ps1
 	Installs C:\Users\andre\Downloads\clockcalib-0.1-arm64-v8a_armeabi-v7a-debug.apk on phone
 	Deletes  C:\Users\andre\Downloads\clockcalib-0.1-arm64-v8a_armeabi-v7a-debug.apk on Windows
 	In Windows Explorer, delete AH S10-2 / SD card / .apk file
+On Phone: look in all apps, run Clock Calibraor
+
+newly installed modules:
+matplotlib
+kivy_garden.graph
+scipy
