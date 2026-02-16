@@ -533,7 +533,7 @@ class ClockApp(App):
         ticks = noises = [] # calculated for whole 'window' - formerly good_nbeats, noises. May later calculate tocks, distinct from ticks
         self.chunk_counter += 1
         if self.chunk_counter % self.chunks_per_window == 0: # time to weed (edge_times_deque is longer than just this chunk)
-            ticks, noises = self.detector.weed_edges_in_window(self.edge_times_deque, plot_it=False, clock_name='unknown')
+            ticks, noises, histogram_data = self.detector.weed_edges_in_window(self.edge_times_deque, clock_name='unknown')
             self.tell(f"[pc] Edges are {len(ticks)} Ticks, {len(noises)} Noises", 3)
 
         # PLOTTING: ==================================================

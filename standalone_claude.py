@@ -9,7 +9,11 @@ logging.getLogger('Python').setLevel(logging.WARNING)
 logging.getLogger('PIL').setLevel(logging.WARNING)
 
 import numpy as np
+from datetime import datetime
+
 import librosa
+from datetime import datetime
+
 import csv
 import os
 
@@ -26,15 +30,13 @@ clock_name = 'Long Case 2' # 60s
 clock_name = 'Box Clock 2' # 40s
 clock_name = 'DJD Mantel 2' # 40s
 
-
 clock_name = 'Djd mantel'
-
 
 chunk_time_s = 4 # seconds - how long each chunk should be for processing. Shorter is more responsive to changes in tick interval, but more computational overhead and less data for histogram analysis. Longer is less responsive to changes in tick interval, but less computational overhead and more data for histogram analysis.
 window_time_s = 60 # seconds - how long the window should be for weeding false positives. Shorter is more responsive to changes in tick interval, but less data for histogram analysis. Longer is less responsive to changes in tick interval, but more data for histogram analysis.
 
 plot_each_chunk = False
-plot_histograms = True
+plot_histograms = False
 
 beats_analysis_window = 200 # how many edges to accumulate before doing weeding false positives
 
@@ -110,13 +112,15 @@ if __name__ == "__main__":
         append_edge_times_to_csv(chunk_edge_times, all_edge_times) # appends to ticks file (with dt1 and dt2)
         all_edge_times.extend(chunk_edge_times) # add it to the array itself
         
-        if False :
-            print(f"Chunk {i+1}/{len(chunks)}: "
-                f"{time_series_data['time_axis'][0]:.2f}s to {time_series_data['time_axis'][-1]:.2f}s - "
+        if True :
+            print(f"{datetime.now().strftime('%H:%M:%S.%f')[:-5]} Chunk {i+1}/{len(chunks)}: "
+                f"{time_series_data['time_axis'][0]:.2f}s to {time_series_data['time_axis'][-1]:.2f}s "
+                f"in {len(chunk)} samples, "
                 f"found {len(chunk_edge_times)} ticks, total so far: {len(all_edge_times)}"
                 )
         if False :
             if len(chunk_edge_times) > 0:
+                print(f"{datetime.now().strftime('%H:%M:%S.%f')[:-5]} Chunk {i} Edge times: {chunk_edge_times}")
                 print(f"Chunk {i} Edge times: {chunk_edge_times}") 
         
         if plot_each_chunk :
@@ -126,15 +130,17 @@ if __name__ == "__main__":
         new_data = len(all_edge_times) - last_window_start_time
         if new_data >= beats_analysis_window:
             edges_to_weed = all_edge_times[-new_data:] # only weed the most recent edges, to see how the histogram evolves over time as more data is added, and to be responsive to changes in tick interval over time 
-            good_beats, bad_beats = detector.weed_edges_in_window(edges_to_weed, plot_histograms, clock_name)
+            good_beats, bad_beats, histogram_data = detector.weed_edges_in_window(edges_to_weed, clock_name)
             last_window_start_time = len(all_edge_times)
+            if plot_histograms:
+                windows_plotting.plot_intervals_histograms(histogram_data)
 
     # end for
 
     # now analyse/plot the last drips after the beats_analysis_window
     new_data = len(all_edge_times) - last_window_start_time
     edges_to_weed = all_edge_times[-new_data:] # only weed the most recent edges, to see how the histogram evolves over time as more data is added, and to be responsive to changes in tick interval over time 
-    good_beats, bad_beats = detector.weed_edges_in_window(edges_to_weed, plot_histograms, clock_name)
+    good_beats, bad_beats, histogram_data = detector.weed_edges_in_window(edges_to_weed, clock_name)
     last_window_start_time = len(all_edge_times)
 
     # Calculate (and plot) histograms

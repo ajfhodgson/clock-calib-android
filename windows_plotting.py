@@ -56,8 +56,9 @@ def plot_chunk_results(chunk_num, total_chunks, edge_times, time_series_data, cl
     plt.show()
 
 
-def plot_intervals_histogram(counts1, bins1, counts2, bins2, counts3=None, bins3=None, counts4=None, bins4=None, clock_name='Clock'):
+def plot_intervals_histograms(histograms_data, clock_name='Clock'):
     """Plot histograms for up to 4 sets of counts and bins in 2x2 subplots."""
+    counts1, bins1, counts2, bins2, counts3, bins3, counts4, bins4, title = histograms_data
     fig, axs = plt.subplots(2, 2, figsize=(14, 10))
     axs = axs.flatten()
     

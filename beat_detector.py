@@ -1,27 +1,35 @@
 import numpy as np
-from scipy import signal
 from kivy.utils import platform
 
-# THIS IMPORT IS NEEDED IF CALLING THIS FROM standalone_claude.py
-#if platform == 'win':
-#    import windows_plotting  # keep matplotlib separate
+from scipy import signal
+import scipy_replacer
 
 class ClockBeatDetector:
     """Stateful clock tick detector for continuous audio streams."""
     
     def __init__(self, sr=44100, min_tick_interval=0.1):
+
+        self.using_scipy = False
+
         self.sr = sr
         self.min_tick_interval = min_tick_interval # not sure that this is useful
         self.min_samples = int(min_tick_interval * sr)
         
-        # Design bandpass filter - butterworth bandpass from 800 to 8000 Hz (typical clock tick frequencies)
-        self.sos = signal.butter(4, [800, 8000], 'bandpass', fs=sr, output='sos') # second order filter
-        self.sos_state = signal.sosfilt_zi(self.sos)         # Initialize filter states
-        
+        if self.using_scipy:
+            # Design bandpass filter - butterworth bandpass from 800 to 8000 Hz (typical clock tick frequencies)
+            self.sos = signal.butter(4, [800, 8000], 'bandpass', fs=sr, output='sos')  # second order filter
+            self.sos_state = signal.sosfilt_zi(self.sos)   # Initialize filter states
+        else:
+            # The scipy replacer has precalculated values built in for the above design
+            from scipy_replacer import ScipyReplacer
+            self.scipy_replaced_sos = ScipyReplacer(sr)
+            self.sos = self.scipy_replaced_sos.sos   # Access the sos attribute from the instance
+            self.sos_state = np.zeros((self.sos.shape[0], 2))
+
         # Run a fast and a slow tracker, to detect 'onset' edge of tick
         self.fast_tc = 0.005
-        self.slow_tc = 0.15
         self.alpha_fast = 1 - np.exp(-1/(sr * self.fast_tc))
+        self.slow_tc = 0.15
         self.alpha_slow = 1 - np.exp(-1/(sr * self.slow_tc))
         
         # Filter coefficients for envelope followers
@@ -31,8 +39,12 @@ class ClockBeatDetector:
         self.a_slow = [1, self.alpha_slow - 1]
         
         # Initialize envelope filter states to zero
-        self.fast_state = signal.lfilter_zi(self.b_fast, self.a_fast) * 0
-        self.slow_state = signal.lfilter_zi(self.b_slow, self.a_slow) * 0
+        if self.using_scipy:
+            self.fast_state = signal.lfilter_zi(self.b_fast, self.a_fast) * 0
+            self.slow_state = signal.lfilter_zi(self.b_slow, self.a_slow) * 0
+        else:
+            self.fast_state = np.zeros(1)  # or just np.array([0.0])
+            self.slow_state = np.zeros(1)
 
         self.mad_factor = 1.0
         
@@ -47,9 +59,20 @@ class ClockBeatDetector:
     
     def reset(self):
         """Reset all states (use when starting a new recording)."""
-        self.sos_state = signal.sosfilt_zi(self.sos)
-        self.fast_state = signal.lfilter_zi(self.b_fast, self.a_fast) * 0
-        self.slow_state = signal.lfilter_zi(self.b_slow, self.a_slow) * 0
+
+        if self.using_scipy:
+            self.sos_state = signal.sosfilt_zi(self.sos)   # Initialize filter states
+        else:
+            self.sos_state = np.zeros((self.sos.shape[0], 2))
+
+        # Initialize envelope filter states to zero
+        if self.using_scipy:
+            self.fast_state = signal.lfilter_zi(self.b_fast, self.a_fast) * 0
+            self.slow_state = signal.lfilter_zi(self.b_slow, self.a_slow) * 0
+        else:
+            self.fast_state = np.zeros(1)  # or just np.array([0.0])
+            self.slow_state = np.zeros(1)
+
         self.last_tick_sample = -self.min_samples
         self.sample_count_before_this_chunk = 0
         self.onset_history = []
@@ -65,10 +88,21 @@ class ClockBeatDetector:
         time_axis = np.arange(len(audio_chunk)) / self.sr + chunk_start_time
         
         # 2-pole Butterworth band-pass filter
-        filtered, self.sos_state = signal.sosfilt(self.sos, audio_chunk, zi=self.sos_state)  # Bandpass filter (with state)
+        if self.using_scipy:
+            filtered, self.sos_state = signal.sosfilt(self.sos, audio_chunk, zi=self.sos_state)
+        else:
+            filtered, self.sos_state = self.scipy_replaced_sos.sosfilt(audio_chunk, zi=self.sos_state)
+  
         rectified = np.abs(filtered) # Rectify to get envelope shape
-        fast_env, self.fast_state = signal.lfilter( self.b_fast, self.a_fast, rectified, zi=self.fast_state )
-        slow_env, self.slow_state = signal.lfilter( self.b_slow, self.a_slow, rectified, zi=self.slow_state )
+
+        # 1-pole LPFs
+        if self.using_scipy:
+            fast_env, self.fast_state = signal.lfilter( self.b_fast, self.a_fast, rectified, zi=self.fast_state )
+            slow_env, self.slow_state = signal.lfilter( self.b_slow, self.a_slow, rectified, zi=self.slow_state )
+        else: # def lfilter(self, alpha, x, state):
+            fast_env, self.fast_state = scipy_replacer.lfilter(self.alpha_fast, rectified, self.fast_state)
+            slow_env, self.slow_state = scipy_replacer.lfilter(self.alpha_slow, rectified, self.slow_state)
+
         onset_strength = fast_env - slow_env  # edge detector array of values, times matching audio_chunk and time_axis
         onset_strength = np.maximum(onset_strength, 0) # discard any negative values in the array
         
@@ -89,11 +123,20 @@ class ClockBeatDetector:
             threshold = 0.0
         
         # Find peaky edges in this chunk - there will be false positives (and false negatives)!
-        peak_indexes, properties = signal.find_peaks(
-            onset_strength,
-            height=threshold, # Minimum height of peaks. Peaks below this value are ignored.
-            prominence=threshold * 0.3 # Minimum prominence of peaks, how much a peak stands out from its surroundings
-        )
+
+
+        if self.using_scipy:
+            peak_indexes, properties = signal.find_peaks(
+                onset_strength,
+                height=threshold, # Minimum height of peaks. Peaks below this value are ignored.
+                prominence=threshold * 0.3 # Minimum prominence of peaks, how much a peak stands out from its surroundings
+            )
+        else:
+            peak_indexes, properties = scipy_replacer.find_peaks_2(
+                onset_strength,
+                height=threshold, # Minimum height of peaks. Peaks below this value are ignored.
+                prominence=threshold * 0.3 # Minimum prominence of peaks, how much a peak stands out from its surroundings
+            )
         
         found_peak_indexes = []
         for peak_index in peak_indexes: # peak_index is index of the peak in the current chunk
@@ -123,7 +166,7 @@ class ClockBeatDetector:
 
 # ======= end of process_chunk method ===========================================
 
-    def weed_edges_in_window(self, edge_times, plot_it, clock_name):
+    def weed_edges_in_window(self, edge_times, clock_name):
         # called when we have a decent window's-worth of edges, enough to make a useful histogram
         # I expect after 4s, 16s, 64s, 256s, 1024s, 4096s, 16384s (4.5 hours) - will get more accurate as more ticks are added, but takes longer to calculate and plot, and less responsive to changes in tick interval over time.
 
@@ -192,6 +235,7 @@ class ClockBeatDetector:
                 beat_period = np.mean(refined_intervals)
                 
                 # Separate into 'ticks' (> avg) and 'tocks' (< avg)
+                #&&Todo - THIS ISN'T THE RIGHT APPROACH TO TICKS AND TOCKS FOR LOW BEAT ERROR!
                 ticks = refined_intervals[refined_intervals > beat_period]
                 tocks = refined_intervals[refined_intervals < beat_period]
                 
@@ -208,10 +252,9 @@ class ClockBeatDetector:
 
                 title = f"{clock_name}: {edge_times[0]:.0f}s to {edge_times[-1]:.0f}s - Period {crude_beat_period:.3f}s -> {beat_period:.3f}s"
 
-                if plot_it :
-                    windows_plotting.plot_intervals_histogram(counts1, bins1, counts2, bins2, counts3, bins3, counts4, bins4, title)
+                histogram_data = (counts1, bins1, counts2, bins2, counts3, bins3, counts4, bins4, title)
 
-        return good_beats, bad_beats
+        return good_beats, bad_beats, histogram_data
 
         # end weed_edges_in_window() =================================
 
