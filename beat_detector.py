@@ -7,8 +7,9 @@ import scipy_replacer
 class ClockBeatDetector:
     """Stateful clock tick detector for continuous audio streams."""
     
-    def __init__(self, sr=44100, min_tick_interval=0.1):
+    def __init__(self, sr, min_tick_interval=0.1):
 
+        self.using_scipy = True
         self.using_scipy = False
 
         self.sr = sr
@@ -16,8 +17,10 @@ class ClockBeatDetector:
         self.min_samples = int(min_tick_interval * sr)
         
         if self.using_scipy:
-            # Design bandpass filter - butterworth bandpass from 800 to 8000 Hz (typical clock tick frequencies)
-            self.sos = signal.butter(4, [800, 8000], 'bandpass', fs=sr, output='sos')  # second order filter
+            # Design bandpass filter - butterworth bandpass from 800 to 8000 Hz (if sample_rate is 44100)
+            # Design bandpass filter - butterworth bandpass from 800 to 3500 Hz (if sample_rate is 8000)
+            # OR - just use 3500 whatever, to see if it's this responsible for the change in behavoiur between 8000 and 44100
+            self.sos = signal.butter(4, [800, 3500], 'bandpass', fs=sr, output='sos')  # second order filter
             self.sos_state = signal.sosfilt_zi(self.sos)   # Initialize filter states
         else:
             # The scipy replacer has precalculated values built in for the above design

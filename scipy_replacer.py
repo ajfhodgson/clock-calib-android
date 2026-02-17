@@ -6,17 +6,27 @@ import numpy as np
 class ScipyReplacer:
     def __init__(self, sr):
         # Load coefficients for 
-        # 1. a Buterworth second order filter, bandpass from 800 to 8000 Hz (typical clock tick frequencies)
+        # 1. a Butterworth second order filter, bandpass from 800 to 3500 Hz (reduced from 8kH due to 8kHz sample rate!)
         # coefficients taken from offline program 'design_filter.py' which depends on scipy
         # self.sos = signal.butter(4, [800, 8000], 'bandpass', fs=sr, output='sos')
 
-        self.sos = np.array([ 
-            [ 0.024406700852204526, 0.04881340170440905, 0.024406700852204526, 1.0, -0.6249181246041945, 0.1487578690348958 ],
-            [ 1.0, 2.0, 1.0, 1.0, -0.670658858820238, 0.5466134300303429 ],
-            [ 1.0, -2.0, 1.0, 1.0, -1.7723326172388825, 0.7884484792733465 ],
-            [ 1.0, -2.0, 1.0, 1.0, -1.914304839059571, 0.9273030296653866  ]
-        ])
-        
+        if sr == 8000:
+            self.sos = np.array([ 
+                [ 0.2444056852342525, -0.488811370468505, 0.2444056852342525, 1.0, -0.9676762066248581, 0.2661626919154533 ],
+                [ 1.0, 2.0, 1.0, 1.0, 1.308164708347803, 0.44609150712484336 ],
+                [ 1.0, -2.0, 1.0, 1.0, -1.3363387905471038, 0.6628102795790545 ],
+                [ 1.0, 2.0, 1.0, 1.0, 1.6279061283127956, 0.7663797729814777 ]
+            ])
+        elif sr == 44100:
+            self.sos = np.array([ 
+                [ 0.024406700852204526, 0.04881340170440905, 0.024406700852204526, 1.0, -0.6249181246041945, 0.1487578690348958 ],
+                [ 1.0, 2.0, 1.0, 1.0, -0.670658858820238, 0.5466134300303429 ],
+                [ 1.0, -2.0, 1.0, 1.0, -1.7723326172388825, 0.7884484792733465 ],
+                [ 1.0, -2.0, 1.0, 1.0, -1.914304839059571, 0.9273030296653866  ]
+            ])
+        else:
+            raise ValueError(f"Unsupported sample rate: {sr}")
+
         # Initialize states
         n_sections = self.sos.shape[0]
         self.sos_state = np.zeros((n_sections, 2))

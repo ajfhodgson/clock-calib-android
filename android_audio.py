@@ -11,7 +11,7 @@ MediaRecorder = autoclass('android.media.MediaRecorder')
 AudioSource = autoclass('android.media.MediaRecorder$AudioSource') # Note the $ sign
 
 class AndroidMic:
-    def __init__(self, sample_rate=44100):
+    def __init__(self, sample_rate):
         print("PYTHON: Initializing AudioSource...")
         self.sample_rate = sample_rate
         self.is_recording = False

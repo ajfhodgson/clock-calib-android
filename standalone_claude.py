@@ -32,11 +32,12 @@ clock_name = 'DJD Mantel 2' # 40s
 
 clock_name = 'Djd mantel'
 
+sample_rate = 8000 # sample rate in Hz, used to be 44100 Hz, which was too heavy to use in filtering without scipy
 chunk_time_s = 4 # seconds - how long each chunk should be for processing. Shorter is more responsive to changes in tick interval, but more computational overhead and less data for histogram analysis. Longer is less responsive to changes in tick interval, but less computational overhead and more data for histogram analysis.
 window_time_s = 60 # seconds - how long the window should be for weeding false positives. Shorter is more responsive to changes in tick interval, but less data for histogram analysis. Longer is less responsive to changes in tick interval, but more data for histogram analysis.
 
 plot_each_chunk = False
-plot_histograms = False
+plot_histograms = True
 
 beats_analysis_window = 200 # how many edges to accumulate before doing weeding false positives
 
@@ -85,18 +86,18 @@ def append_edge_times_to_csv(new_edges, previous_edges):
 # Usage example with wav file
 if __name__ == "__main__":
 
-    # Load wav file and resample to 44100 Hz
+    # Load wav file and resample to specified sample_rate (44100 or 8000 Hz)
     print("Loading audio file...")
-    audio, sr = librosa.load(clock_name + ".wav", sr=44100, mono=True)
+    audio, sr = librosa.load(clock_name + ".wav", sr=sample_rate, mono=True)
     print(f"Loaded {len(audio)/sr:.2f} seconds of audio at {sr} Hz")
     
     # Create chunks of 4 seconds
-    chunk_size = chunk_time_s * sr  # seconds * 44100 samples/sec
+    chunk_size = chunk_time_s * sr  # seconds * 8000 samples/sec
     chunks = [audio[i:i+chunk_size] for i in range(0, len(audio), chunk_size)]
     print(f"Split into {len(chunks)} chunks of {chunk_time_s} seconds each\n")
     
     # Create detector and process chunks
-    detector = beat_detector.ClockBeatDetector(sr=44100)
+    detector = beat_detector.ClockBeatDetector(sr=sample_rate)
     
     # Replace previous CSV if exists
     if os.path.exists(clock_name +"ticks.csv"):

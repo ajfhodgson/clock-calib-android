@@ -2,10 +2,10 @@ from scipy import signal
 import numpy as np
 import json
 
-sr = 44100  # your sample rate
+sr = 8000  # your sample rate
 
 # Design the bandpass filter
-sos = signal.butter(4, [800, 8000], 'bandpass', fs=sr, output='sos')
+sos = signal.butter(4, [800, 3500], 'bandpass', fs=sr, output='sos')
 
 # Envelope filter coefficients
 fast_tc = 0.005

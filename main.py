@@ -96,7 +96,7 @@ class ClockApp(App):
         self.tell_mask = 1 + 2 + 8 + 16   # Controls which tell() messages are emitted; bitmask flags (default: just bit 0 = 1)
 
         # set parameters
-        self.sample_rate = 44100
+        self.sample_rate = 8000
         self.chunk_time_s = 4.0 
         self.chunks_per_window = 4 # likely to want 15 in prod
         self.audio_chart_time_s = 60.0
@@ -127,7 +127,7 @@ class ClockApp(App):
 
 
         # Initialize Claude's clock tick detector
-        self.detector = beat_detector.ClockBeatDetector(sr=44100, min_tick_interval=0.3)
+        self.detector = beat_detector.ClockBeatDetector(sr=self.sample_rate, min_tick_interval=0.3)
 
         if True :    # Initialise UI 
 
@@ -257,7 +257,7 @@ class ClockApp(App):
             bottom_layout.add_widget(self.timegrapher_chart)
             
             # Area 3: Audio Chart
-            self.audio_chart = kivy_plotting.ScrollingGraphWidget(x_span_s=self.audio_chart_time_s)
+            self.audio_chart = kivy_plotting.ScrollingGraphWidget(x_span_s=self.audio_chart_time_s, sr=self.sample_rate)
             bottom_layout.add_widget(self.audio_chart)
 
             layout.add_widget(bottom_layout)
@@ -512,7 +512,7 @@ class ClockApp(App):
         # SWAP BUFFERS FIRST: Tier 1 immediately switches to the fresh buffer
         self.active_buffer, self.inactive_buffer = self.inactive_buffer, self.active_buffer
         num_samples = len(self.inactive_buffer)
-        calc_sample_rate = num_samples/self.chunk_time_s # hopefully 44100 Hz
+        calc_sample_rate = num_samples/self.chunk_time_s # hopefully close to self.sample_rate (144100 or 8000 Hz)
         sample_rate_error_pc = (calc_sample_rate / self.sample_rate -1)*100 # self.sample_rate is nominal sample clock 
         file_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") # wall clock time
         self.tell(f"[pc]     {file_timestamp} : chunk starts at {self.ms_since_start:.3f}", 3)
