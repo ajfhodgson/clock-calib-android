@@ -1,7 +1,6 @@
 import numpy as np
 from kivy.utils import platform
 
-from scipy import signal
 import scipy_replacer
 
 class ClockBeatDetector:
@@ -17,6 +16,7 @@ class ClockBeatDetector:
         self.min_samples = int(min_tick_interval * sr)
         
         if self.using_scipy:
+            from scipy import signal # only import it if we're going to use it! (not available on android build)
             # Design bandpass filter - butterworth bandpass from 800 to 8000 Hz (if sample_rate is 44100)
             # Design bandpass filter - butterworth bandpass from 800 to 3500 Hz (if sample_rate is 8000)
             # OR - just use 3500 whatever, to see if it's this responsible for the change in behavoiur between 8000 and 44100

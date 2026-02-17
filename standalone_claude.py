@@ -12,6 +12,7 @@ import numpy as np
 from datetime import datetime
 
 import librosa
+import soundfile as sf
 from datetime import datetime
 
 import csv
@@ -90,6 +91,7 @@ if __name__ == "__main__":
     print("Loading audio file...")
     audio, sr = librosa.load(clock_name + ".wav", sr=sample_rate, mono=True)
     print(f"Loaded {len(audio)/sr:.2f} seconds of audio at {sr} Hz")
+    sf.write(clock_name + "_ds.wav", audio, sr)
     
     # Create chunks of 4 seconds
     chunk_size = chunk_time_s * sr  # seconds * 8000 samples/sec
