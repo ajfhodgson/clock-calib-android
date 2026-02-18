@@ -438,10 +438,10 @@ class ClockApp(App):
 
     def permission_callback(self, permissions, results):
         if all(results):
-            self.tell("[Android] Permissions granted.")
+            self.tell(f"[Android] {results} Permissions granted.")
             self.start_android_audio()
         else:
-            self.tell("[Android] Permissions denied.")
+            self.tell("[Android] {results} Permissions denied.")
             self.status_label.text = "Permissions Denied"
             self.stop_session(None)
 
@@ -476,7 +476,7 @@ class ClockApp(App):
                 if all(check_permission(p) for p in perms):
                     self.start_android_audio()
                 else:
-                    self.tell("[Android] Requesting permissions...")
+                    self.tell(f"[Android] Requesting permissions {perms}...")
                     request_permissions(perms, self.permission_callback)
                 return
             else:
