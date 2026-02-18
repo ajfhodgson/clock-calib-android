@@ -1,4 +1,16 @@
 import numpy as np
+from kivy.utils import platform
+import os
+
+# Set KIVY_HOME on Android to a writable directory before other Kivy imports.
+# This is to fix a "Permission denied" error when Kivy tries to copy
+# its icon files to a non-writable location on startup.
+if platform == 'android':
+    from jnius import autoclass
+    PythonActivity = autoclass('org.kivy.android.PythonActivity')
+    activity = PythonActivity.mActivity
+    os.environ['KIVY_HOME'] = activity.getFilesDir().getAbsolutePath()
+
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
