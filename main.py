@@ -100,7 +100,7 @@ class ClockApp(App):
         self.chunk_time_s = 4.0 
         self.chunks_per_window = 4 # likely to want 15 in prod
         self.audio_chart_time_s = 30.0  # displayed window duration; changeable via Chart (sec) input
-        self.audio_downsample_factor = 1000
+        self.audio_downsample_factor = 80 # was 1000 for 44100Hz
 
         self.window_time_s = self.chunk_time_s * self.chunks_per_window # 60 seconds - how long the window should be for weeding false positives. Shorter is more responsive to changes in tick interval, but less data for histogram analysis. Longer is less responsive to changes in tick interval, but more data for histogram analysis.
         self.samples_per_chunk = int(self.sample_rate * self.chunk_time_s)
@@ -441,7 +441,7 @@ class ClockApp(App):
         """Recreate the audio chart with the current x_span_s value."""
         self.audio_chart_container.clear_widgets()
         self.audio_chart = kivy_plotting.ScrollingGraphWidget(
-            x_span_s=self.audio_chart_time_s, sr=self.sample_rate)
+            x_span_s=self.audio_chart_time_s, sr=self.sample_rate, downsample_factor=self.audio_downsample_factor)
         self.audio_chart_container.add_widget(self.audio_chart)
 
     def _setup_area2(self):
@@ -575,8 +575,21 @@ class ClockApp(App):
         f = self.audio_downsample_factor # only for visualisation on chart, not for calculations!
         vds_data = {k: v[::f] for k, v in time_series_data.items()} # downsamples ALL members of time_series_data
 
-        if 'a' in self.tell_flags: # expanded audio visualisation requested
-            selected_vds_data = {'time_axis': vds_data['time_axis'], 'onset_strength': vds_data['onset_strength'], 'threshold': vds_data['threshold']}
+#            'time_axis': time_axis,  # Time in seconds for each sample in chunk
+#            'audio_chunk': audio_chunk,  # Include original audio for plotting
+#            'onset_strength': onset_strength,
+#            'threshold': np.full_like(time_axis, threshold),
+#            'fast_env': fast_env,
+#            'slow_env': slow_env,
+#            'filtered': filtered,
+
+        if 'a' in self.tell_flags: # max audio visualisation requested
+            selected_vds_data = {'time_axis': vds_data['time_axis'], 
+                                 'filtered': vds_data['filtered'], 
+                                 'fast_env': vds_data['fast_env'], 
+                                 'slow_env': vds_data['slow_env'], 
+                                 'onset_strength': vds_data['onset_strength'], 
+                                 'threshold': vds_data['threshold']}
         else:
             selected_vds_data = {'time_axis': vds_data['time_axis'], 'onset_strength': vds_data['onset_strength'], 'threshold': vds_data['threshold']}
 

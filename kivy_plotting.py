@@ -54,7 +54,8 @@ class ScrollingGraphWidget(BoxLayout):
         # Extract custom arguments before calling super() to avoid Kivy unknown arg error
         self.x_span_s = kwargs.pop('x_span_s', 60) # seconds to show on x-axis
         self.sr = kwargs.pop('sr', 8000) # sample rate
-        self.ts_buffer_len = kwargs.pop('ts_buffer_len', int(self.x_span_s * self.sr / 1000)) # buffer length for plotting
+        self.downsample_factor = kwargs.pop('downsample_factor', 1000)
+        self.ts_buffer_len = kwargs.pop('ts_buffer_len', int(self.x_span_s * self.sr / self.downsample_factor)) # buffer length for plotting
         self.ev_buffer_len = kwargs.pop('ev_buffer_len', int(self.x_span_s * 20)) # buffer length for plotting events
         self.colours = kwargs.pop('chart_colours', default_colours) 
         super().__init__(**kwargs)
