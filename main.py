@@ -433,7 +433,7 @@ class ClockApp(App):
             self.tell(f"[Android] All permissions granted: {permissions} {results}")
             self.start_android_audio()
         else:
-            self.tell(f"[Android] "Some permissions denied: {permissions} {results}.")
+            self.tell(f"[Android] Some permissions denied: {permissions} {results}.")
             self.status_label.text = "Some permissions denied: {permissions} {results}"
             self.stop_session(None)
 
