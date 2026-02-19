@@ -1,0 +1,13 @@
+
+# Buterworth second order filter, bandpass from 800 to 8000 Hz (typical clock tick frequencies)
+# coefficients taken from offline program 'design_filter.py' which depends on scipy
+coeffs = {
+  "sos": [ 
+    [ 0.024406700852204526, 0.04881340170440905, 0.024406700852204526, 1.0, -0.6249181246041945, 0.1487578690348958 ],
+    [ 1.0, 2.0, 1.0, 1.0, -0.670658858820238, 0.5466134300303429 ],
+    [ 1.0, -2.0, 1.0, 1.0, -1.7723326172388825, 0.7884484792733465 ],
+    [ 1.0, -2.0, 1.0, 1.0, -1.914304839059571, 0.9273030296653866  ]
+  ],
+  "alpha_fast": 0.004524879139899407,
+  "alpha_slow": 0.00015116015389549098
+}
