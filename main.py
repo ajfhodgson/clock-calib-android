@@ -1,16 +1,4 @@
 import numpy as np
-from kivy.utils import platform
-import os
-
-# Set KIVY_HOME on Android to a writable directory before other Kivy imports.
-# This is to fix a "Permission denied" error when Kivy tries to copy
-# its icon files to a non-writable location on startup.
-if platform == 'android':
-    from jnius import autoclass
-    PythonActivity = autoclass('org.kivy.android.PythonActivity')
-    activity = PythonActivity.mActivity
-    os.environ['KIVY_HOME'] = activity.getFilesDir().getAbsolutePath()
-
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
@@ -438,10 +426,10 @@ class ClockApp(App):
 
     def permission_callback(self, permissions, results):
         if all(results):
-            self.tell(f"[Android] {results} Permissions granted.")
+            self.tell("[Android] Permissions granted.")
             self.start_android_audio()
         else:
-            self.tell(f"[Android] {results} Permissions denied.")
+            self.tell("[Android] Permissions denied.")
             self.status_label.text = "Permissions Denied"
             self.stop_session(None)
 
@@ -471,12 +459,12 @@ class ClockApp(App):
             if platform == 'android':
                 # Request audio and storage permissions on Android
                 from android.permissions import request_permissions, check_permission, Permission
-                perms = [Permission.RECORD_AUDIO]
+                perms = [Permission.RECORD_AUDIO, Permission.WRITE_EXTERNAL_STORAGE]
                 
                 if all(check_permission(p) for p in perms):
                     self.start_android_audio()
                 else:
-                    self.tell(f"[Android] Requesting permissions {perms}...")
+                    self.tell("[Android] Requesting permissions...")
                     request_permissions(perms, self.permission_callback)
                 return
             else:
