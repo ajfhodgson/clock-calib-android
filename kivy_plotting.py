@@ -1,5 +1,6 @@
 from kivy.uix.boxlayout import BoxLayout
-from kivy_garden.graph import Graph, MeshLinePlot, ScatterPlot
+from kivy.uix.label import Label
+from kivy_garden.graph import Graph, MeshLinePlot, ScatterPlot, BarPlot
 from collections import deque
 import numpy as np
 
@@ -105,32 +106,29 @@ class ScrollingGraphWidget(BoxLayout):
                 self.ev_buffers[ev_name] = deque(maxlen=self.ev_buffer_len)
                 self.ev_plots[ev_name] = ScatterPlot(color=self.colours[ev_name], point_size=3)
                 self.graph.add_plot(self.ev_plots[ev_name])
-            self.ev_buffers[ev_name].extend(ev_data_to_append[ev_name]) # simply append he new data to the correct buffer
+            self.ev_buffers[ev_name].extend(ev_data_to_append[ev_name])
 
-            #&&ToDo - take care of the potential overlap - only add new data points later than the existing last event time
-            # for events, we just have times in s. What to use for y-value? Could be 0 for simplicity for now
-            # otherwise we have to look through ts_buffers['time_axis'] for a matching time, then look this time up in
-            # one of the other ts_series, e.g. 'filtered' or 'onset_strength', which would require knowing which in here 
-            # (I'd prefer to be open_minded)
-
-            np_time_buffer = np.array(self.ts_buffers['time_axis']) # outside the loop - need it for all event series
-            #&&ToDo - should pass in the name of the timeseries whose y-value to plot evets at, not guess the name!
+            np_time_buffer = np.array(self.ts_buffers['time_axis'])
             if 'onset_strength' in self.ts_buffers:
                 np_y_value_buffer = np.array(self.ts_buffers['onset_strength'])
             else:
                 np_y_value_buffer = np.zeros(len(self.ts_buffers['time_axis']))
 
-            if len(self.ev_buffers[ev_name]) == 0:
-                self.ev_plots[ev_name].points = []
-            else:
-                # For each edge time, find the corresponding y-value on the onset data
-                for ev_time in self.ev_buffers[ev_name]:
-                # Find the closest time in the timescale array
-                    idx = np.searchsorted(np_time_buffer, ev_time)
-                    idx = min(idx, len(np_y_value_buffer) - 1)
+            # Rebuild plot points entirely from the deque each time (never append),
+            # so the points list stays bounded to ev_buffer_len and can never overflow.
+            # Also filter to only events within the visible x window.
+            x_min_visible = self.graph.xmin
+            x_max_visible = self.graph.xmax
+            new_points = []
+            for ev_time in self.ev_buffers[ev_name]:
+                if ev_time < x_min_visible or ev_time > x_max_visible:
+                    continue
+                idx = np.searchsorted(np_time_buffer, ev_time)
+                idx = min(idx, len(np_y_value_buffer) - 1)
                     # Get x-value from time series and y-value from onset strength at this time
                     # add to the plotted points
-                    self.ev_plots[ev_name].points.append((ev_time, np_y_value_buffer[idx]))
+                new_points.append((ev_time, np_y_value_buffer[idx]))
+            self.ev_plots[ev_name].points = new_points
 
         # Update x-axis to show scrolling window - show the most recent x_span_s
         if self.latest_time <= self.x_span_s:   # Still filling up the first window
@@ -166,5 +164,88 @@ class ScrollingGraphWidget(BoxLayout):
         self.graph.xmax = self.x_span_s
         
 #==========================  end of class ScrollingGraphWidget() =====================
+
+
+class HistogramWidget(BoxLayout):
+    """
+    Kivy widget that draws two histogram bar charts side-by-side using kivy_garden Graph,
+    so axis labelling is handled automatically — same as ScrollingGraphWidget.
+      Left:  counts1 / bins1  (raw dt1 — all detected edges)
+      Right: counts3 / bins3  (weeded dt1 — after false-positive removal)
+
+    Call  update(histogram_data)  with the tuple returned by
+    beat_detector.weed_edges_in_window().
+
+    histogram_data = (counts1, bins1, counts2, bins2, counts3, bins3, counts4, bins4, title)
+    Only counts1/bins1 and counts3/bins3 are used here.
+    X-axis values are in milliseconds.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(orientation='horizontal', **kwargs)
+
+        self._left_graph  = self._make_graph()
+        self._right_graph = self._make_graph()
+
+        self._left_plot  = BarPlot(color=[0.3, 0.6, 1.0, 1], bar_spacing=0.9)
+        self._right_plot = BarPlot(color=[0.3, 1.0, 0.5, 1], bar_spacing=0.9)
+
+        self._left_graph.add_plot(self._left_plot)
+        self._right_graph.add_plot(self._right_plot)
+
+        # bind_to_graph must be called after add_plot so BarPlot can calculate bar widths
+        self._left_plot.bind_to_graph(self._left_graph)
+        self._right_plot.bind_to_graph(self._right_graph)
+
+        self.add_widget(self._left_graph)
+        self.add_widget(self._right_graph)
+
+    def _make_graph(self):
+        return Graph(
+            x_ticks_minor=0, x_ticks_major=100,
+            y_ticks_major=1,
+            x_grid_label=True, y_grid_label=False,
+            x_grid=True, y_grid=True,
+            padding=5,
+            xmin=0, xmax=1000,
+            ymin=0, ymax=1,
+        )
+
+    # ------------------------------------------------------------------
+    def update(self, histogram_data):
+        """
+        histogram_data is the tuple from weed_edges_in_window:
+          (counts1, bins1, counts2, bins2, counts3, bins3, counts4, bins4, title)
+        """
+        counts1, bins1, _c2, _b2, counts3, bins3, _c4, _b4, _title = histogram_data
+        self._update_graph(self._left_graph,  self._left_plot,  counts1, bins1)
+        self._update_graph(self._right_graph, self._right_plot, counts3, bins3)
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _update_graph(graph, plot, counts, bins):
+        """Push new histogram data into one Graph panel. X axis in ms."""
+        if counts is None or len(counts) == 0:
+            return
+
+        bin_centers_ms = (bins[:-1] + bins[1:]) / 2 * 1000   # ms
+        plot.points = list(zip(bin_centers_ms, counts))
+
+        # Update axis ranges
+        x_max_ms = bins[-1] * 1000
+        y_max    = max(counts) if max(counts) > 0 else 1
+
+        graph.xmin = 0
+        graph.xmax = float(x_max_ms)
+        graph.ymin = 0
+        graph.ymax = float(y_max) * 1.1
+
+        # Aim for ~5 major x ticks
+        tick = max(1, round(x_max_ms / 5 / 50) * 50)   # round to nearest 50 ms
+        graph.x_ticks_major = float(tick)
+        graph.y_ticks_major = max(1, int(y_max / 5))
+
+
+#==========================  end of class HistogramWidget() ======================
 if __name__ == "__main__":
     print("DON'T RUN THIS - RUN THE FILE THAT CALLS THIS!.")

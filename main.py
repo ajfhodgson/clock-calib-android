@@ -21,13 +21,13 @@ import kivy_plotting # custom Kivy widget for plotting scrolling graphs of audio
 
 
 # Mask bits for tell() messages:
-# Bit 0 (1): Startup and status/error messages
-# Bit 1 (2): 
-# Bit 2 (4): File writing messages
-# Bit 3 (8): Chunk Analysis summary
-# Bit 4 (16): Chunk Analysis detail 
-# Bit 5 (32): WindowWeeder summary
-# 
+# Bit 0 (1):   Startup and status/error messages
+# Bit 1 (2):   File writing messages
+# Bit 2 (4):   File writing messages
+# Bit 3 (8):   Chunk Analysis summary
+# Bit 4 (16):  Chunk Analysis detail 
+# Bit 5 (32):  WindowWeeder summary
+# Bit 6 (64):  Show dt1/weeded-dt1 histograms in Area 2 Timegrapher Chart
 
 #&&ToDo - avoid the crash on Android after first run/request for microphone permission
 #&&ToDo - ensure there is a timestamp (ms since pressing Start) with the amplitude data in CSV
@@ -93,7 +93,7 @@ class ClockApp(App):
         # Configuration
         # UI-changeable defaults
         self.target_bph = 8860 # sriaght-sided mantel clock - default - can be set in UI
-        self.tell_mask = 1 + 2 + 8 + 16   # Controls which tell() messages are emitted; bitmask flags (default: just bit 0 = 1)
+        self.tell_mask = 1 + 2 + 8 + 16 + 64   # Controls which tell() messages are emitted; bitmask flags (default: bits 0,1,3,4,6 = 91)
 
         # set parameters
         self.sample_rate = 8000
@@ -102,7 +102,6 @@ class ClockApp(App):
         self.audio_chart_time_s = 60.0
         self.audio_downsample_factor = 1000
         self.beats_chart_time_s = 120.0
-        self.peak_thresh_pc = 0.1 # not currently used
 
         self.window_time_s = self.chunk_time_s * self.chunks_per_window # 60 seconds - how long the window should be for weeding false positives. Shorter is more responsive to changes in tick interval, but less data for histogram analysis. Longer is less responsive to changes in tick interval, but more data for histogram analysis.
         self.samples_per_chunk = int(self.sample_rate * self.chunk_time_s)
@@ -183,15 +182,15 @@ class ClockApp(App):
             tb_box.add_widget(self.bph_input)
             entries_layout.add_widget(tb_box)
 
-            # Peak Threshold %
+            # Chart time (seconds)
             pt_box = BoxLayout(orientation='horizontal')
-            l3 = Label(text='Peaks\n(%)', size_hint_x=1.0)
+            l3 = Label(text='Chart\n(sec)', size_hint_x=1.0)
             autoscale(l3, 0.3)
             pt_box.add_widget(l3)
-            self.peak_input = TextInput(text=str(getattr(self, 'peak_thresh_pc', 0.1)), multiline=False, input_filter='float', size_hint_x=0.9)
-            autoscale(self.peak_input, 0.4)
-            self.peak_input.bind(on_text_validate=self.on_peak_input, on_focus=self.on_peak_focus)
-            pt_box.add_widget(self.peak_input)
+            self.chart_input = TextInput(text=str(getattr(self, 'beats_chart_time_s', 120)), multiline=False, input_filter='float', size_hint_x=0.9)
+            autoscale(self.chart_input, 0.4)
+            self.chart_input.bind(on_text_validate=self.on_chart_input, on_focus=self.on_chart_focus)
+            pt_box.add_widget(self.chart_input)
             entries_layout.add_widget(pt_box)
 
             # Tell mask (bitmask input)
@@ -246,15 +245,18 @@ class ClockApp(App):
 #            self.stats_area.add_widget(Label(text='Stats Area'))
 #            bottom_layout.add_widget(self.stats_area)
             
-            # Area 2: Timegrapher Chart
-            self.timegrapher_chart = BoxLayout(orientation='vertical')
-            with self.timegrapher_chart.canvas.before:
+            # Area 2: Timegrapher Chart placeholder — content is swapped in at session start
+            # depending on tell_mask bits (bit 6 = 64: histogram, others TBD)
+            self.area2 = BoxLayout(orientation='vertical')
+            with self.area2.canvas.before:
                 Color(0, 0.1, 0, 1)
-                self.tg_rect = Rectangle(size=self.timegrapher_chart.size, pos=self.timegrapher_chart.pos)
-            self.timegrapher_chart.bind(size=lambda instance, value: setattr(self.tg_rect, 'size', value))
-            self.timegrapher_chart.bind(pos=lambda instance, value: setattr(self.tg_rect, 'pos', value))
-            self.timegrapher_chart.add_widget(Label(text='Timegrapher Chart'))
-            bottom_layout.add_widget(self.timegrapher_chart)
+                self.tg_rect = Rectangle(size=self.area2.size, pos=self.area2.pos)
+            self.area2.bind(size=lambda w, v: setattr(self.tg_rect, 'size', v))
+            self.area2.bind(pos=lambda w, v:  setattr(self.tg_rect, 'pos',  v))
+            self._area2_label = Label(text='Timegrapher Chart')
+            self.area2.add_widget(self._area2_label)
+            bottom_layout.add_widget(self.area2)
+            self.histogram_chart = None  # created on demand at session start
             
             # Area 3: Audio Chart
             self.audio_chart = kivy_plotting.ScrollingGraphWidget(x_span_s=self.audio_chart_time_s, sr=self.sample_rate)
@@ -374,14 +376,18 @@ class ClockApp(App):
         if not value:
             self.on_bph_input(instance)
 
-    def on_peak_input(self, instance):
-        val = self._parse_float(instance.text, self.peak_thresh_pc)
-        self.peak_thresh_pc = val
-        self.tell(f"[UI] Peak threshold set to {self.peak_thresh_pc}%")
+    def on_chart_input(self, instance):
+        val = self._parse_float(instance.text, self.beats_chart_time_s)
+        if val <= 0:
+            self.tell("[UI] Invalid chart duration, keeping previous value")
+            self.chart_input.text = str(self.beats_chart_time_s)
+            return
+        self.beats_chart_time_s = val
+        self.tell(f"[UI] Chart duration set to {self.beats_chart_time_s}s")
 
-    def on_peak_focus(self, instance, value):
+    def on_chart_focus(self, instance, value):
         if not value:
-            self.on_peak_input(instance)
+            self.on_chart_input(instance)
 
     def on_tell_input(self, instance):
         val = self._parse_int(instance.text, getattr(self, 'tell_mask', 1))
@@ -404,7 +410,7 @@ class ClockApp(App):
         fg_enabled = (0, 0, 0, 1)
         fg_disabled = (0.5, 0.5, 0.5, 1)
 
-        for widget in (self.win_input, self.bph_input, self.peak_input, self.tell_input):
+        for widget in (self.win_input, self.bph_input, self.chart_input, self.tell_input):
             widget.disabled = not enabled
             widget.background_color = bg_enabled if enabled else bg_disabled
             widget.foreground_color = fg_enabled if enabled else fg_disabled
@@ -433,8 +439,24 @@ class ClockApp(App):
             self.status_label.text = "Permissions Denied"
             self.stop_session(None)
 
+    def _setup_area2(self):
+        """Swap the content of Area 2 based on tell_mask bits.
+        Bit 6 (64): histogram widget.
+        Default (no recognised bit): plain placeholder label.
+        Add further elif branches here as new Area 2 modes are defined.
+        """
+        self.area2.clear_widgets()
+        self.histogram_chart = None  # reset any previous reference
+
+        if (self.tell_mask >> 6) & 1:  # bit 6 — histogram
+            self.histogram_chart = kivy_plotting.HistogramWidget()
+            self.area2.add_widget(self.histogram_chart)
+        else:
+            self.area2.add_widget(self._area2_label)
+
     def start_session(self, instance):
         self.tell("Start button clicked...")
+        self._setup_area2()          # wire up Area 2 content for this session
         self.is_running = True
         self.ms_since_start = 0.0
         self.buffer_a = []
@@ -535,6 +557,9 @@ class ClockApp(App):
         if self.chunk_counter % self.chunks_per_window == 0: # time to weed (edge_times_deque is longer than just this chunk)
             ticks, noises, histogram_data = self.detector.weed_edges_in_window(self.edge_times_deque, clock_name='unknown')
             self.tell(f"[pc] Edges are {len(ticks)} Ticks, {len(noises)} Noises", 3)
+            # Bit 6 (64): show histogram in Area 2 Timegrapher Chart
+            if self.histogram_chart is not None:
+                Clock.schedule_once(lambda dt, hd=histogram_data: self.histogram_chart.update(hd), 0)
 
         # PLOTTING: ==================================================
         # Delayed until after conditionally calculating good and bad beats
