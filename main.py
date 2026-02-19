@@ -487,7 +487,7 @@ class ClockApp(App):
             if platform == 'android':
                 # Request audio and storage permissions on Android
                 from android.permissions import request_permissions, check_permission, Permission
-                perms = [Permission.RECORD_AUDIO, Permission.WRITE_EXTERNAL_STORAGE]
+                perms = [Permission.RECORD_AUDIO]
                 
                 if all(check_permission(p) for p in perms):
                     self.start_android_audio()
