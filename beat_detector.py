@@ -248,16 +248,16 @@ class ClockBeatDetector:
                 beat_error_s = abs(tick_interval - tock_interval) / 2
                 beat_error_pc = (beat_error_s / beat_period * 100.0) if beat_period > 0 else 0.0
 
-                str = f"Window: {edge_times[0]:.0f}s to {edge_times[-1]:.0f}s. {len(edge_times)} - {len(bad_beats)} = {len(good_beats)} beats. "
+                str = f"Window: {len(edge_times)} - {len(bad_beats)} = {len(good_beats)} beats. "
                 str += f"BPH {3600/crude_beat_period:.1f}s -> {(3600/beat_period):.1f}). "
                 str += f"Tick/Tock {tick_interval:.3f}s / {tock_interval:.3f}s -> {beat_error_s:.3f} s ({beat_error_pc:.1f}%)"
-                print(str)
+                report = str
 
                 title = f"{clock_name}: {edge_times[0]:.0f}s to {edge_times[-1]:.0f}s - Period {crude_beat_period:.3f}s -> {beat_period:.3f}s"
 
                 histogram_data = (counts1, bins1, counts2, bins2, counts3, bins3, counts4, bins4, title)
 
-        return good_beats, bad_beats, histogram_data
+        return good_beats, bad_beats, histogram_data, report
 
         # end weed_edges_in_window() =================================
 

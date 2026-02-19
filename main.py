@@ -20,14 +20,14 @@ import beat_detector # clock tick detector (lots of help from Claude AI)
 import kivy_plotting # custom Kivy widget for plotting scrolling graphs of audio and detected beats
 
 
-# Mask bits for tell() messages:
-# Bit 0 (1):   Startup and status/error messages
-# Bit 1 (2):   File writing messages
-# Bit 2 (4):   File writing messages
-# Bit 3 (8):   Chunk Analysis summary
-# Bit 4 (16):  Chunk Analysis detail 
-# Bit 5 (32):  WindowWeeder summary
-# Bit 6 (64):  Show dt1/weeded-dt1 histograms in Area 2 Timegrapher Chart
+# Mask flags for tell() messages:
+# t:   Startup and status/error messages, plus timestamp
+# f:   File reading/writing messages
+# c/C: Chunk Analysis 1-line summary/detail
+# w/W: Window Weeder Analysis 1-line summary/detail
+# h:   Show before/after weeding histogram in area 2
+# a:   Add filtered audio to the audio plot (onset and threshold are there by default)
+# l:   Add low-pass filter trackers to audio plot (onset and threshold are there by default)
 
 #&&ToDo - avoid the crash on Android after first run/request for microphone permission
 #&&ToDo - ensure there is a timestamp (ms since pressing Start) with the amplitude data in CSV
@@ -76,12 +76,12 @@ def write_csv(app, filename_root, timestamp, headers, columns):
         # verify file has been written and where 
         if os.path.exists(filepath):
             file_size = os.path.getsize(filepath)
-            app.tell(f"[Tier 2] {filename} written ({file_size} bytes)",2)
+            app.tell(f"{filename} written ({file_size} bytes)",'f')
         else:
-            app.tell(f"[Tier 2] ERROR: File not created - {filepath}",2)
+            app.tell(f"ERROR: File not created - {filepath}",'f')
 
     except Exception as e:
-        app.tell(f"[Tier 2] I/O Error ({filename_root}): {e}")
+        app.tell(f"I/O Error ({filename_root}): {e}",'0')
 
 #############################################-----------------------------------------------
 
@@ -93,15 +93,14 @@ class ClockApp(App):
         # Configuration
         # UI-changeable defaults
         self.target_bph = 8860 # sriaght-sided mantel clock - default - can be set in UI
-        self.tell_mask = 1 + 2 + 8 + 16 + 64   # Controls which tell() messages are emitted; bitmask flags (default: bits 0,1,3,4,6 = 91)
+        self.tell_flags = 'cwh0'   # Controls which tell() messages are emitted
 
         # set parameters
         self.sample_rate = 8000
         self.chunk_time_s = 4.0 
         self.chunks_per_window = 4 # likely to want 15 in prod
-        self.audio_chart_time_s = 60.0
+        self.audio_chart_time_s = 30.0  # displayed window duration; changeable via Chart (sec) input
         self.audio_downsample_factor = 1000
-        self.beats_chart_time_s = 120.0
 
         self.window_time_s = self.chunk_time_s * self.chunks_per_window # 60 seconds - how long the window should be for weeding false positives. Shorter is more responsive to changes in tick interval, but less data for histogram analysis. Longer is less responsive to changes in tick interval, but more data for histogram analysis.
         self.samples_per_chunk = int(self.sample_rate * self.chunk_time_s)
@@ -187,18 +186,18 @@ class ClockApp(App):
             l3 = Label(text='Chart\n(sec)', size_hint_x=1.0)
             autoscale(l3, 0.3)
             pt_box.add_widget(l3)
-            self.chart_input = TextInput(text=str(getattr(self, 'beats_chart_time_s', 120)), multiline=False, input_filter='float', size_hint_x=0.9)
+            self.chart_input = TextInput(text=str(getattr(self, 'audio_chart_time_s', 30)), multiline=False, input_filter='float', size_hint_x=0.9)
             autoscale(self.chart_input, 0.4)
             self.chart_input.bind(on_text_validate=self.on_chart_input, on_focus=self.on_chart_focus)
             pt_box.add_widget(self.chart_input)
             entries_layout.add_widget(pt_box)
 
-            # Tell mask (bitmask input)
+            # Tell flags
             ts_box = BoxLayout(orientation='horizontal')
-            l4 = Label(text='Tell\nmask', size_hint_x=1.0)
+            l4 = Label(text='Tell\nflags', size_hint_x=1.0)
             autoscale(l4, 0.3)
             ts_box.add_widget(l4)
-            self.tell_input = TextInput(text=str(getattr(self, 'tell_mask', 1)), multiline=False, input_filter='int', size_hint_x=0.9)
+            self.tell_input = TextInput(text=self.tell_flags, multiline=False, size_hint_x=0.9)
             autoscale(self.tell_input, 0.4)
             self.tell_input.bind(on_text_validate=self.on_tell_input, on_focus=self.on_tell_focus)
             ts_box.add_widget(self.tell_input)
@@ -246,7 +245,7 @@ class ClockApp(App):
 #            bottom_layout.add_widget(self.stats_area)
             
             # Area 2: Timegrapher Chart placeholder — content is swapped in at session start
-            # depending on tell_mask bits (bit 6 = 64: histogram, others TBD)
+            # depending on tell_flags including 'h'
             self.area2 = BoxLayout(orientation='vertical')
             with self.area2.canvas.before:
                 Color(0, 0.1, 0, 1)
@@ -258,20 +257,21 @@ class ClockApp(App):
             bottom_layout.add_widget(self.area2)
             self.histogram_chart = None  # created on demand at session start
             
-            # Area 3: Audio Chart
-            self.audio_chart = kivy_plotting.ScrollingGraphWidget(x_span_s=self.audio_chart_time_s, sr=self.sample_rate)
-            bottom_layout.add_widget(self.audio_chart)
+            # Area 3: Audio Chart — container filled at session start with correct x_span_s
+            self.audio_chart_container = BoxLayout(orientation='vertical')
+            bottom_layout.add_widget(self.audio_chart_container)
+            self.audio_chart = None  # created at session start
 
             layout.add_widget(bottom_layout)
 
-            self.tell(f"[Init] Screen Size: {Window.size}")
+            self.tell(f"Screen Size: {Window.size}")
 
         # Attempt to delete old CSVs on startup
         deleted = 0
         failed = 0
         try:
             save_dir = get_save_directory()
-            self.tell(f"[Init] CSVs folder: {save_dir}", 0)
+            self.tell(f"File save folder: {save_dir}")
             for filename in os.listdir(save_dir):
                 if filename.lower().endswith(".csv"):
                     try:
@@ -280,8 +280,8 @@ class ClockApp(App):
                     except Exception as e:
                         failed += 1
         except Exception as e:
-            self.tell(f"[Init] Error accessing save directory: {e}")
-        self.tell(f"[Init] {deleted} CSVs deleted, {failed} failed to be deleted", 0)
+            self.tell(f"Error accessing save folder: {e}")
+        self.tell(f"{deleted} CSVs deleted, {failed} failed to be deleted")
 
         return layout
 
@@ -300,17 +300,20 @@ class ClockApp(App):
 #--            print(f"[Tier 1] Audio callback: appended {samples_count} samples (active buffer now has {len(self.active_buffer)} total)")
 
     # --- TIER 3: UI THREAD CONTROLS ---
-    def tell(self, message, mask_bit=0):
+    def tell(self, message, tell_flag='0'): # '0' is all startup and error messages (and the default)
         """Write a message to the scrolling text region and optionally to console.
-        Only outputs if bit mask_bit is set in `self.tell_mask`.
+        Only outputs if tell_flag is included in `self.tell_flags`.
         """
-        # If the requested mask_bit is not set in tell_mask, skip output
+        # If the requested char is not present in tell_flags, skip output
         try:
-            if not ((1 << mask_bit) & getattr(self, 'tell_mask', 1)):
+            if not (tell_flag in self.tell_flags):
                 return
         except Exception:
             pass
-        mess = datetime.now().strftime("%H:%M:%S.%f")[:-5] + ' ' + str(mask_bit) + ': ' + message
+        mess = ''
+        if 'T' in self.tell_flags:
+            mess += datetime.now().strftime("%H:%M:%S.%f")[:-5] + ' '
+        mess += tell_flag + ': ' + message
         if platform == 'win':
             print(mess)
         # Schedule the UI update to the scrolling message window on the main thread
@@ -349,16 +352,16 @@ class ClockApp(App):
     def _set_chunk_time_s(self, text):
         val = self._parse_float(text, self.chunk_time_s)
         if val <= 0:
-            self.tell("[UI] Invalid chunk duration, keeping previous value")
+            self.tell("Invalid chunk duration, keeping previous value")
             self.win_input.text = str(self.chunk_time_s)
             return
         self.chunk_time_s = val
         self.samples_per_chunk = int(self.sample_rate * self.chunk_time_s)
-        self.tell(f"[UI] chunk duration set to {self.chunk_time_s}s")
+        self.tell(f"Chunk duration set to {self.chunk_time_s}s")
         if self.is_running:
             Clock.unschedule(self.process_chunk_buffer)
             Clock.schedule_interval(self.process_chunk_buffer, self.chunk_time_s)
-            self.tell("[UI] Rescheduled buffer processing to new chunk duration")
+            self.tell("Rescheduled buffer processing to new chunk duration")
 
     def on_window_input(self, instance):
         self._set_chunk_time_s(instance.text)
@@ -370,33 +373,28 @@ class ClockApp(App):
     def on_bph_input(self, instance):
         val = self._parse_int(instance.text, self.target_bph)
         self.target_bph = val
-        self.tell(f"[UI] Target BPH set to {self.target_bph}")
+        self.tell(f"Target BPH set to {self.target_bph}")
 
     def on_bph_focus(self, instance, value):
         if not value:
             self.on_bph_input(instance)
 
     def on_chart_input(self, instance):
-        val = self._parse_float(instance.text, self.beats_chart_time_s)
+        val = self._parse_float(instance.text, self.audio_chart_time_s)
         if val <= 0:
-            self.tell("[UI] Invalid chart duration, keeping previous value")
-            self.chart_input.text = str(self.beats_chart_time_s)
+            self.tell("Invalid chart duration, keeping previous value")
+            self.chart_input.text = str(self.audio_chart_time_s)
             return
-        self.beats_chart_time_s = val
-        self.tell(f"[UI] Chart duration set to {self.beats_chart_time_s}s")
+        self.audio_chart_time_s = val
+        self.tell(f"Chart duration set to {self.audio_chart_time_s}s")
 
     def on_chart_focus(self, instance, value):
         if not value:
             self.on_chart_input(instance)
 
     def on_tell_input(self, instance):
-        val = self._parse_int(instance.text, getattr(self, 'tell_mask', 1))
-        if val < 0:
-            self.tell("[UI] Invalid tell mask value; must be non-negative")
-            self.tell_input.text = str(self.tell_mask)
-            return
-        self.tell_mask = val
-        self.tell(f"[UI] Tell mask set to {self.tell_mask}")
+        self.tell_flags = instance.text
+        self.tell(f"Tell flags set to {self.tell_flags}")
 
     def on_tell_focus(self, instance, value):
         if not value:
@@ -432,23 +430,30 @@ class ClockApp(App):
 
     def permission_callback(self, permissions, results):
         if all(results):
-            self.tell("[Android] Permissions granted.")
+            self.tell(f"[Android] All permissions granted: {permissions} {results}")
             self.start_android_audio()
         else:
-            self.tell("[Android] Permissions denied.")
-            self.status_label.text = "Permissions Denied"
+            self.tell(f"[Android] Permissions denied.")
+            self.status_label.text = "Some permissions denied: {permissions} {results}"
             self.stop_session(None)
 
+    def _setup_audio_chart(self):
+        """Recreate the audio chart with the current x_span_s value."""
+        self.audio_chart_container.clear_widgets()
+        self.audio_chart = kivy_plotting.ScrollingGraphWidget(
+            x_span_s=self.audio_chart_time_s, sr=self.sample_rate)
+        self.audio_chart_container.add_widget(self.audio_chart)
+
     def _setup_area2(self):
-        """Swap the content of Area 2 based on tell_mask bits.
-        Bit 6 (64): histogram widget.
-        Default (no recognised bit): plain placeholder label.
+        """Swap the content of Area 2 based on tell_flags.
+        'h': histogram widget.
+        Default (no recognised flag): plain placeholder label.
         Add further elif branches here as new Area 2 modes are defined.
         """
         self.area2.clear_widgets()
         self.histogram_chart = None  # reset any previous reference
 
-        if (self.tell_mask >> 6) & 1:  # bit 6 — histogram
+        if 'h' in self.tell_flags:
             self.histogram_chart = kivy_plotting.HistogramWidget()
             self.area2.add_widget(self.histogram_chart)
         else:
@@ -456,7 +461,8 @@ class ClockApp(App):
 
     def start_session(self, instance):
         self.tell("Start button clicked...")
-        self._setup_area2()          # wire up Area 2 content for this session
+        self._setup_area2()
+        self._setup_audio_chart()
         self.is_running = True
         self.ms_since_start = 0.0
         self.buffer_a = []
@@ -475,7 +481,7 @@ class ClockApp(App):
         self.stream = None
         self.mic = None
 
-        self.audio_chart.clear_buffers()  # Clear the plot buffers at the start of a new session
+        self.audio_chart.clear_buffers()  # ensure clean state (chart was just recreated, but belt-and-braces)
 
         try:
             if platform == 'android':
@@ -537,8 +543,8 @@ class ClockApp(App):
         calc_sample_rate = num_samples/self.chunk_time_s # hopefully close to self.sample_rate (144100 or 8000 Hz)
         sample_rate_error_pc = (calc_sample_rate / self.sample_rate -1)*100 # self.sample_rate is nominal sample clock 
         file_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") # wall clock time
-        self.tell(f"[pc]     {file_timestamp} : chunk starts at {self.ms_since_start:.3f}", 3)
-        self.tell(f"[pc] Samples: {num_samples} in {self.chunk_time_s} s -> {calc_sample_rate} Hz, ({sample_rate_error_pc:.3f} %)", 4)
+        self.tell(f"Got chunk from {(self.ms_since_start/1000):.4f}s", 'C')
+        self.tell(f"{num_samples} samples in {self.chunk_time_s}s -> {calc_sample_rate:.0f} Hz, ({sample_rate_error_pc:.2f} %)", 'C')
         
         audio_chunk_amp = np.array(self.inactive_buffer) # copy out pos/neg waveform samples
         self.inactive_buffer.clear()
@@ -547,7 +553,7 @@ class ClockApp(App):
         time_series_data, chunk_edge_times = self.detector.process_chunk(audio_chunk_amp)
 #        time_series_data is {'time_axis', 'audio_chunk', 'onset_strength', 'threshold', 'fast_env', 'slow_env', 'filtered'}
 
-        self.tell(f"[pc] Chunk {self.chunk_counter}, found {len(chunk_edge_times)} edges, total {len(self.edge_times_deque)}", 4)
+        self.tell(f"Chunk {self.chunk_counter}: {len(chunk_edge_times)} edges, total {len(self.edge_times_deque)}", 'c')
         self.edge_times_deque.extend(chunk_edge_times) # cross-chunk data accumulation for beat weeding
 
         # WEEDING: ===================================================
@@ -555,25 +561,28 @@ class ClockApp(App):
         ticks = noises = [] # calculated for whole 'window' - formerly good_nbeats, noises. May later calculate tocks, distinct from ticks
         self.chunk_counter += 1
         if self.chunk_counter % self.chunks_per_window == 0: # time to weed (edge_times_deque is longer than just this chunk)
-            ticks, noises, histogram_data = self.detector.weed_edges_in_window(self.edge_times_deque, clock_name='unknown')
-            self.tell(f"[pc] Edges are {len(ticks)} Ticks, {len(noises)} Noises", 3)
+            ticks, noises, histogram_data, report = self.detector.weed_edges_in_window(self.edge_times_deque, clock_name='unknown')
+            self.tell(f"[win] " + report, 'w')
             # Bit 6 (64): show histogram in Area 2 Timegrapher Chart
             if self.histogram_chart is not None:
-                Clock.schedule_once(lambda dt, hd=histogram_data: self.histogram_chart.update(hd), 0)
+                Clock.schedule_once(lambda dt, hd=histogram_data: self.histogram_chart.update(hd), 0) #&&ToDo hmmm...?
 
         # PLOTTING: ==================================================
         # Delayed until after conditionally calculating good and bad beats
         # downsample the time series arrays by self.audio_downsample_factor
         # in the plotter, these are appended to the plotting deques (length self.audio_chart_time_s)
 
-        f = self.audio_downsample_factor
-        downsampled_data = {k: v[::f] for k, v in time_series_data.items()} # downsamples ALL members of time_series_data
+        f = self.audio_downsample_factor # only for visualisation on chart, not for calculations!
+        vds_data = {k: v[::f] for k, v in time_series_data.items()} # downsamples ALL members of time_series_data
 
-        selected_ds_data = {'time_axis': downsampled_data['time_axis'], 'onset_strength': downsampled_data['onset_strength'], 'threshold': downsampled_data['threshold']}
+        if 'a' in self.tell_flags: # expanded audio visualisation requested
+            selected_vds_data = {'time_axis': vds_data['time_axis'], 'onset_strength': vds_data['onset_strength'], 'threshold': vds_data['threshold']}
+        else:
+            selected_vds_data = {'time_axis': vds_data['time_axis'], 'onset_strength': vds_data['onset_strength'], 'threshold': vds_data['threshold']}
 
         event_data = {'edges': chunk_edge_times, 'ticks': ticks, 'noises': noises}
 
-        self.audio_chart.add_chunk_to_plot(selected_ds_data, event_data) # plot all of them
+        self.audio_chart.add_chunk_to_plot(selected_vds_data, event_data) # plot all of them
       
         if False: # 
             # Thread 1: Save raw audio CSV in Tier 2 Worker Thread (Daemon=True so they die if app closes)

@@ -72,7 +72,8 @@ class ScrollingGraphWidget(BoxLayout):
         self.graph = Graph(
             x_ticks_minor=5, x_ticks_major=10, y_ticks_major=0.001, 
             x_grid=True, y_grid=True, y_grid_label=True, x_grid_label=True, padding=5,
-            xmin=0, xmax=self.x_span_s, # initial default this gets rolled on as time goes by
+            font_size='12sp',
+            xmin=0, xmax=self.x_span_s,  # initial default this gets rolled on as time goes by
             ymin=-0.01, ymax=0.0001 # initial default - we'll auto-scale this based on data in the current window
         )
                 
@@ -203,10 +204,11 @@ class HistogramWidget(BoxLayout):
     def _make_graph(self):
         return Graph(
             x_ticks_minor=0, x_ticks_major=100,
-            y_ticks_major=1,
+            y_ticks_major=0,            # no y ticks → no reserved y-axis space
             x_grid_label=True, y_grid_label=False,
-            x_grid=True, y_grid=True,
+            x_grid=True, y_grid=False,  # no y gridlines since no y ticks
             padding=5,
+            font_size='9sp',            # small enough to fit at compact window size
             xmin=0, xmax=1000,
             ymin=0, ymax=1,
         )
@@ -243,7 +245,6 @@ class HistogramWidget(BoxLayout):
         # Aim for ~5 major x ticks
         tick = max(1, round(x_max_ms / 5 / 50) * 50)   # round to nearest 50 ms
         graph.x_ticks_major = float(tick)
-        graph.y_ticks_major = max(1, int(y_max / 5))
 
 
 #==========================  end of class HistogramWidget() ======================
